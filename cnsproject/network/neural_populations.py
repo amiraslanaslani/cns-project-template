@@ -267,6 +267,10 @@ class LIFPopulation(NeuralPopulation):
         trace_scale: Union[float, torch.Tensor] = 1.,
         is_inhibitory: bool = False,
         learning: bool = True,
+        u_rest: Union[float, torch.Tensor] = 0, #
+        tau_t: Union[float, torch.Tensor] = 5,
+        resistance: Union[float, torch.Tensor] = 1,
+        threshold: Union[float, torch.Tensor] = 30,
         **kwargs
     ) -> None:
         super().__init__(
@@ -279,62 +283,92 @@ class LIFPopulation(NeuralPopulation):
             learning=learning,
         )
 
-        """
-        TODO.
+        # Set model parameters
+        self.u_rest = torch.tensor(u_rest)
+        self.tau_t = torch.tensor(tau_t)
+        self.resistance = torch.tensor(resistance)
+        self.threshold = torch.tensor(threshold)
 
-        1. Add the required parameters.
-        2. Fill the body accordingly.
-        """
+        self.register_buffer("u", self.u_rest)
+        self.register_buffer("time", torch.tensor(0))
+        self.register_buffer("current", torch.tensor(0))
 
-    def forward(self, traces: torch.Tensor) -> None:
+    def set_timestep(self, dt: Union[float, torch.Tensor]) -> None:
         """
-        TODO.
+        Time step length setter.
 
-        1. Make use of other methods to fill the body. This is the main method\
-           responsible for one step of neuron simulation.
-        2. You might need to call the method from parent class.
-        """
-        pass
+        Parameters
+        ----------
+        dt : Union[float, torch.Tensor]
+            Time step length.
 
-    def compute_potential(self) -> None:
-        """
-        TODO.
+        Returns
+        -------
+        None
 
-        Implement the neural dynamics for computing the potential of LIF\
-        neurons. The method can either make changes to attributes directly or\
-        return the result for further use.
         """
-        pass
+        self.dt = torch.tensor(dt)
 
-    def compute_spike(self) -> None:
+    def forward(self, current: torch.Tensor) -> None:
         """
-        TODO.
+        Simulate the neural population for a single step.
 
-        Implement the spike condition. The method can either make changes to\
-        attributes directly or return the result for further use.
+        Parameters
+        ----------
+        current : torch.Tensor
+            Input electric current.
+
+        Returns
+        -------
+        None
+
         """
-        pass
+        self.current = current
+        self.u = self.compute_potential(current)
+        self.compute_spike()
+        self.time = self.time + self.dt
+
+    def compute_potential(self, current: torch.Tensor) -> torch.Tensor:
+        """
+        Compute the potential of neurons in the population.
+
+        Parameters
+        ----------
+        current : torch.Tensor
+            Input electric current.
+
+        Returns
+        -------
+        torch.Tensor
+
+        """
+        d_part = -(self.u - self.u_rest) / self.tau_t
+        c_part = (self.resistance * current) / self.tau_t
+        u_n = self.u + self.dt * (d_part + c_part)
+        return u_n
+
+    def compute_spike(self) -> bool:
+        if self.u >= self.threshold:
+            self.refractory_and_reset()
+            return True
+        else:
+            self.s = torch.tensor(False)
+            return False
 
     @abstractmethod
     def refractory_and_reset(self) -> None:
-        """
-        TODO.
-
-        Implement the refractory and reset conditions. The method can either\
-        make changes to attributes directly or return the computed value for\
-        further use.
-        """
-        pass
+        self.u = self.u_rest
+        self.s = torch.tensor(True)
 
     @abstractmethod
     def compute_decay(self) -> None:
-        """
-        TODO.
+        super().compute_decay()
 
-        Implement the dynamics of decays. You might need to call the method from
-        parent class.
-        """
-        pass
+    def reset_state_variables(self) -> None:
+        super().reset_state_variables()
+        self.u = self.u_rest
+        self.time = torch.tensor(0)
+        self.current = torch.tensor(0)
 
 
 class ELIFPopulation(NeuralPopulation):
