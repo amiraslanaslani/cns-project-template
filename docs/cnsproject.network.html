@@ -191,6 +191,8 @@
 <dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">abc.ABC</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">torch.nn.modules.module.Module</span></code></p>
 <p>Abstract class for implementing connections.</p>
 <p>Make sure to implement the <cite>compute</cite>, <cite>update</cite>, and <cite>reset_state_variables</cite>    methods in your child class.</p>
+<p>You will need to define the populations you want to connect as <cite>pre</cite> and <cite>post</cite>.    In case of learning, you will need to define the learning rate (<cite>lr</cite>) and the     learning rule to follow. Attribute <cite>w</cite> is reserved for synaptic weights.    However, it has not been predefined or allocated, as it depends on the     pattern of connectivity. So make sure to define it in child class initializations     appropriately to indicate the pattern of connectivity. The default range of     each synaptic weight is [0, 1] but it can be controlled by <cite>wmin</cite> and <cite>wmax</cite>.     Synaptic strengths might decay in time and do not last forever. To define     the decay rate of the synaptic weights, use <cite>weight_decay</cite> attribute. Also,     if you want to control the overall input synaptic strength to each neuron,     use <cite>norm</cite> argument to normalize the synaptic weights.</p>
+<p>In case of learning, you have to implement the methods <cite>compute</cite> and <cite>update</cite>.     You will use the <cite>compute</cite> method to calculate the activity of post-synaptic     population based on the pre-synaptic one. Update of weights based on the     learning rule will be implemented in the <cite>update</cite> method. If you find this     architecture mind-bugling, try your own architecture and make sure to redefine     the learning rule architecture to be compatible with this new architecture     of yours.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
@@ -433,6 +435,7 @@ activity of the pre-synaptic population.</p>
 <span class="gp">&gt;&gt;&gt; </span><span class="n">time</span> <span class="o">=</span> <span class="mi">10</span>  <span class="c1"># time of simulation</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="n">dt</span> <span class="o">=</span> <span class="mf">1.0</span>  <span class="c1"># time resolution</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="n">monitor</span><span class="o">.</span><span class="n">set_time_steps</span><span class="p">(</span><span class="n">time</span><span class="p">,</span> <span class="n">dt</span><span class="p">)</span>  <span class="c1"># record the whole simulation</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">monitor</span><span class="o">.</span><span class="n">reset_state_variables</span><span class="p">()</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">time</span><span class="p">):</span>
 <span class="gp">... </span>    <span class="c1"># compute input spike trace and call `neuron.forward(input_trace)`</span>
 <span class="gp">... </span>    <span class="n">monitor</span><span class="o">.</span><span class="n">record</span><span class="p">()</span>
@@ -545,6 +548,8 @@ activity of the pre-synaptic population.</p>
 <span class="go">10 miliseconds.</span>
 </pre></div>
 </div>
+<p>You will need to implement the <cite>run</cite> method. This mthod is responsible for the whole simulation     procedure of a spiking neural network. You will have to compute number of time steps using     <cite>dt</cite> attribute of the class and <cite>time</cite> parameter of the method. then you will iteratively call     the procedures for single step simulation of network objects.</p>
+<p><strong>NOTE:</strong> If you faced any errors related to importing packages, modify the <cite>__init__.py</cite> files     accordingly to solve the problem.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
@@ -621,6 +626,8 @@ learning. The default is None.</p></li>
 <dt id="cnsproject.network.network.Network.run">
 <code class="sig-name descname"><span class="pre">run</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">time</span></span><span class="p"><span class="pre">:</span></span> <span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inputs</span></span><span class="p"><span class="pre">:</span></span> <span class="n"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span> </span><span class="pre">torch.Tensor</span><span class="p"><span class="pre">]</span></span></span> <span class="o"><span class="pre">=</span></span> <span class="default_value"><span class="pre">{}</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">one_step</span></span><span class="p"><span class="pre">:</span></span> <span class="n"><span class="pre">bool</span></span> <span class="o"><span class="pre">=</span></span> <span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> &#x2192; <span class="pre">None</span><a class="headerlink" href="#cnsproject.network.network.Network.run" title="Permalink to this definition">¶</a></dt>
 <dd><p>Simulate network for a specific time duration with the possible given        input.</p>
+<p>Input to each layer is given to <cite>inputs</cite> parameter. As you see, it is a         dictionary of population’s name and tensor of input values through time.         There is a parameter named <cite>one_step</cite>. This parameter will define how the         input is propagated through the network: does it go forward up to the final         layer in one time step or it passes from one layer to the next in each         step of simulation. You can easily remove it if it is mind-bugling.</p>
+<p>Also, make sure to call <cite>self.reset_state_variables()</cite> before starting the         simulation.</p>
 <p>TODO.</p>
 <p>Implement the body of this method.</p>
 <dl class="field-list simple">

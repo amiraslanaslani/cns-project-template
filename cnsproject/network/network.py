@@ -39,6 +39,14 @@ class Network(torch.nn.Module):
     the synaptic weights and output layer's spikes and voltages. We simulate the network for
     10 miliseconds.
 
+    You will need to implement the `run` method. This mthod is responsible for the whole simulation \
+    procedure of a spiking neural network. You will have to compute number of time steps using \
+    `dt` attribute of the class and `time` parameter of the method. then you will iteratively call \
+    the procedures for single step simulation of network objects.
+
+    **NOTE:** If you faced any errors related to importing packages, modify the `__init__.py` files \
+    accordingly to solve the problem.
+
     Arguments
     ---------
     dt : float, Optional
@@ -71,6 +79,9 @@ class Network(torch.nn.Module):
 
         self.train(learning)
 
+        # Make sure that arguments of your reward and decision classes do not
+        # share same names. Their arguments are passed to the network as its
+        # keyword arguments.
         self.reward = reward(**kwargs)
         self.decision = decision(**kwargs)
 
@@ -156,6 +167,16 @@ class Network(torch.nn.Module):
         Simulate network for a specific time duration with the possible given\
         input.
 
+        Input to each layer is given to `inputs` parameter. As you see, it is a \
+        dictionary of population's name and tensor of input values through time. \
+        There is a parameter named `one_step`. This parameter will define how the \
+        input is propagated through the network: does it go forward up to the final \
+        layer in one time step or it passes from one layer to the next in each \
+        step of simulation. You can easily remove it if it is mind-bugling.
+
+        Also, make sure to call `self.reset_state_variables()` before starting the \
+        simulation.
+
         TODO.
 
         Implement the body of this method.
@@ -183,8 +204,8 @@ class Network(torch.nn.Module):
             Mapping of connection names to boolean masks of the weights to clamp
             to zero.
 
-        Note: you can pass the reward and decision arguments as keyword\
-        argumeents to this function.
+        **Note:** you can pass the reward and decision methods' arguments as keyword\
+        arguments to this function.
 
         Returns
         -------
