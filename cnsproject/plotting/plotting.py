@@ -15,7 +15,7 @@ also a bonus. The visualizations you will definitely need are as follows:
 """
 
 from __future__ import annotations
-from typing import Union, Type
+from typing import Union, Type, Tuple
 
 from matplotlib.axes import Axes
 import matplotlib.pyplot as plt
@@ -29,9 +29,11 @@ class Plot:
 
     def __init__(
             self,
-            monitor: Monitor,
-            shape=(1, 1),
-            grid_spec: bool = False
+            monitor: Union[Monitor, None] = None,
+            shape: Tuple[int, int] = (1, 1),
+            grid_spec: bool = False,
+            figsize: Tuple[int, int] = (10, 10),
+            title: Union[str, None] = None
     ):
         self.monitor = monitor
         self.shape = shape
@@ -39,15 +41,18 @@ class Plot:
         self.grid_axs = []
 
         if grid_spec:
-            self.fig = plt.figure()
+            self.fig = plt.figure(figsize=figsize)
             self.grid = plt.GridSpec(shape[0], shape[1])
             self.axs = None
         else:
             self.grid = None
-            self.fig, self.axs = plt.subplots(shape[0], shape[1])
+            self.fig, self.axs = plt.subplots(shape[0], shape[1], figsize=figsize)
             if isinstance(self.axs, Axes):
                 self.axs = np.array(self.axs)
             self.axs = self.axs.reshape(shape[0], shape[1])
+
+        if not (title is None):
+            self.fig.suptitle(title)
 
     def plot(
             self,
@@ -56,8 +61,14 @@ class Plot:
             y: int = 0,
             x_until: Union[int, None] = None,
             y_until: Union[int, None] = None,
+            monitor: Monitor = None,
             **kwargs
     ) -> Plot:
+        if monitor is None:
+            monitor_in_use = self.monitor
+        else:
+            monitor_in_use = monitor
+
         if self.grid_spec:
             if not x_until:
                 x_until = x + 1
@@ -66,13 +77,20 @@ class Plot:
                 y_until = y + 1
 
             ax = self.fig.add_subplot(self.grid[x:x_until, y:y_until])
-            plotter.plot(ax, self.monitor, **kwargs)
+            plotter.plot(ax, monitor_in_use, **kwargs)
             self.grid_axs.append(ax)
         else:
-            plotter.plot(self.axs[x][y], self.monitor, **kwargs)
+            plotter.plot(self.axs[x][y], monitor_in_use, **kwargs)
         return self
 
-    def show(self):
+    def make_tight(self) -> Plot:
         self.fig.tight_layout()
+        return self
+
+    def show(self=None) -> None:
         plt.show()
+
+    def save(self, fname: str, **kwargs) -> Plot:
+        self.fig.savefig(fname, **kwargs)
+        return self
 

@@ -7,33 +7,56 @@ import copy
 import torch
 
 from ..network.monitors import Monitor
+from ..network.neural_populations import NeuralPopulation
+from ..network.connections import AbstractConnection
 
 
 class AbstractPlotter(ABC):
     @staticmethod
     @abstractmethod
-    def plot(ax: Axes, monitor: Monitor, **kwargs) -> Axes:
+    def plot(ax: Axes, monitor: Union[Monitor, None], **kwargs) -> Axes:
         pass
 
 
 class PotentialTimePlotter(AbstractPlotter):
     @staticmethod
-    def plot(ax: Axes, monitor: Monitor, time_unit=None, **kwargs) -> Axes:
-        time_unit = f"({time_unit})" if time_unit else ""
+    def plot(ax: Axes, monitor: Union[Monitor, None], time_unit=None, spikes: bool = False, **kwargs) -> Axes:
+        time_unit = f" ({time_unit})" if time_unit else ""
         ax.set_title("Electric Potential")
         ax.set_xlabel("time" + time_unit)
         ax.set_ylabel("U(time)")
-        ax.plot(
-            monitor.get("time"),
-            monitor.get("u")
-        )
+        u_vector = monitor.get("u")
+        time_vector = monitor.get("time")
+        ax.plot(time_vector, u_vector)
+
+        if spikes:
+            PotentialTimePlotter.plot_spikes(
+                monitor,
+                ax,
+                u_vector.min(),
+                u_vector.max(),
+            )
         return ax
+
+    @staticmethod
+    def plot_spikes(monitor: Monitor, ax: Axes, min: float, max: float):
+        spike_points = monitor.get("s")
+        for spike in spike_points.nonzero(as_tuple=True)[0]:
+            ax.vlines(
+                spike,
+                min,
+                max,
+                linestyles="dashed",
+                colors="red",
+                zorder=3,
+                linewidth=3
+            )
 
 
 class CurrentTimePlotter(AbstractPlotter):
     @staticmethod
-    def plot(ax: Axes, monitor: Monitor, time_unit=None, **kwargs) -> Axes:
-        time_unit = f"({time_unit})" if time_unit else ""
+    def plot(ax: Axes, monitor: Union[Monitor, None], time_unit=None, **kwargs) -> Axes:
+        time_unit = f" ({time_unit})" if time_unit else ""
         ax.set_title("Electric Current")
         ax.set_xlabel("time" + time_unit)
         ax.set_ylabel("I(time)")
@@ -48,7 +71,8 @@ class FIPlotter(AbstractPlotter):
     @staticmethod
     def plot(
             ax: Axes,
-            monitor: Monitor,
+            monitor: Union[Monitor, None],
+            neuron: Union[NeuralPopulation, AbstractConnection, None],
             current_to: Union[int, float] = 20,
             step_size: Union[int, float] = 1,
             current_from: Union[int, float] = 1,
@@ -62,34 +86,51 @@ class FIPlotter(AbstractPlotter):
 
         spikes = []
         currents = []
-
         for current in torch.arange(current_from, current_to, step_size):
-            neuron = copy.deepcopy(monitor.obj)
-            neuron.reset_state_variables()
-            if not (time_step is None):
-                neuron.set_timestep(time_step)
+            if neuron is None:
+                neuron_obj = copy.deepcopy(monitor.obj)
+            else:
+                neuron_obj = copy.deepcopy(neuron)
 
-            monitor = Monitor(
-                neuron,
-                state_variables=["s"],
-                time=int(time / time_step + 1)
+            f = FIPlotter.get_frequency_of(
+                neuron_obj,
+                current,
+                time_step,
+                time
             )
-
-            current_value = torch.tensor(current)
-            for _ in torch.arange(0, time, time_step):
-                neuron.forward(current_value)
-                monitor.record()
-
-            del neuron
-            spikes_tensor = monitor.get("s")
-            # print(spikes_tensor)
-            spikes_number = spikes_tensor.sum()
-            print(spikes_number)
-            spikes.append(spikes_number)
+            spikes.append(f)
             currents.append(current)
 
         spikes = torch.tensor(spikes)
         currents = torch.tensor(currents)
         ax.plot(currents, spikes)
         return ax
+
+    @staticmethod
+    def get_frequency_of(
+            neuron: Union[NeuralPopulation, AbstractConnection, None],
+            current: Union[float, int],
+            time_step: Union[int, float, None],
+            time: Union[int, float],
+
+    ):
+        neuron.reset_state_variables()
+        if not (time_step is None):
+            neuron.set_timestep(time_step)
+
+        monitor = Monitor(
+            neuron,
+            state_variables=["s"]
+        )
+        monitor.set_time_steps(time, time_step)
+        monitor.reset_state_variables()
+
+        current_value = torch.tensor(current)
+        for _ in torch.arange(0, time, time_step):
+            neuron.forward(current_value)
+            monitor.record()
+
+        spikes_tensor = monitor.get("s")
+        spikes_number = spikes_tensor.sum()
+        return spikes_number
 
