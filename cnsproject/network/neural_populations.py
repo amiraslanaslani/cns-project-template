@@ -77,6 +77,8 @@ class NeuralPopulation(torch.nn.Module):
 
     """
 
+    RB_SPIKES = "s"
+
     def __init__(
         self,
         shape: Iterable[int],
@@ -111,7 +113,7 @@ class NeuralPopulation(torch.nn.Module):
 
         # You can use `torch.Tensor()` instead of `torch.zeros(*shape, dtype=torch.bool)` if \
         # `reset_state_variables` is intended to be called before every simulation.
-        self.register_buffer("s", torch.zeros(*self.shape, dtype=torch.bool))
+        self.register_buffer(self.RB_SPIKES, torch.zeros(*self.shape, dtype=torch.bool))
         self.dt = None
 
     @abstractmethod
@@ -301,6 +303,10 @@ class LIFPopulation(NeuralPopulation):
     Follow the template structure of NeuralPopulation class for consistency.
     """
 
+    RB_CURRENT = "current"
+    RB_TIME = "time"
+    RB_POTENTIAL = "u"
+
     def __init__(
         self,
         shape: Iterable[int],
@@ -332,9 +338,9 @@ class LIFPopulation(NeuralPopulation):
         self.resistance = torch.tensor(resistance)
         self.threshold = torch.tensor(threshold)
 
-        self.register_buffer("u", self.u_rest)
-        self.register_buffer("time", torch.tensor(0))
-        self.register_buffer("current", torch.tensor(0))
+        self.register_buffer(self.RB_POTENTIAL, self.u_rest)
+        self.register_buffer(self.RB_TIME, torch.tensor(0))
+        self.register_buffer(self.RB_CURRENT, torch.tensor(0))
 
     def set_timestep(self, dt: Union[float, torch.Tensor]) -> None:
         """
@@ -367,28 +373,27 @@ class LIFPopulation(NeuralPopulation):
 
         """
         self.current = current
-        self.u = self.compute_potential(current)
+        self.u = self.compute_potential()
         self.compute_spike()
         self.time = self.time + self.dt
 
-    def compute_potential(self, current: torch.Tensor) -> torch.Tensor:
+    def compute_potential(self) -> torch.Tensor:
         """
         Compute the potential of neurons in the population.
-
-        Parameters
-        ----------
-        current : torch.Tensor
-            Input electric current.
 
         Returns
         -------
         torch.Tensor
 
         """
-        d_part = -(self.u - self.u_rest) / self.tau_t
-        c_part = (self.resistance * current) / self.tau_t
-        u_n = self.u + self.dt * (d_part + c_part)
-        return u_n
+        return self.u + self.dt * self.compute_delta_u()  # Euler forward method
+
+    def compute_delta_u(self) -> torch.Tensor:
+        c_part = (self.resistance * self.current)
+        return (self.compute_decay() + c_part) / self.tau_t
+
+    def compute_decay(self) -> torch.Tensor:
+        return -(self.u - self.u_rest)
 
     def compute_spike(self) -> bool:
         if self.u >= self.threshold:
@@ -398,14 +403,9 @@ class LIFPopulation(NeuralPopulation):
             self.s = torch.tensor(False)
             return False
 
-    @abstractmethod
     def refractory_and_reset(self) -> None:
         self.u = self.u_rest
         self.s = torch.tensor(True)
-
-    @abstractmethod
-    def compute_decay(self) -> None:
-        super().compute_decay()
 
     def reset_state_variables(self) -> None:
         super().reset_state_variables()
@@ -414,7 +414,7 @@ class LIFPopulation(NeuralPopulation):
         self.current = torch.tensor(0)
 
 
-class ELIFPopulation(NeuralPopulation):
+class ELIFPopulation(LIFPopulation):
     """
     Layer of Exponential Leaky Integrate and Fire neurons.
 
@@ -425,15 +425,21 @@ class ELIFPopulation(NeuralPopulation):
     """
 
     def __init__(
-        self,
-        shape: Iterable[int],
-        spike_trace: bool = True,
-        additive_spike_trace: bool = True,
-        tau_s: Union[float, torch.Tensor] = 10.,
-        trace_scale: Union[float, torch.Tensor] = 1.,
-        is_inhibitory: bool = False,
-        learning: bool = True,
-        **kwargs
+            self,
+            shape: Iterable[int],
+            spike_trace: bool = True,
+            additive_spike_trace: bool = True,
+            tau_s: Union[float, torch.Tensor] = 10.,
+            trace_scale: Union[float, torch.Tensor] = 1.,
+            is_inhibitory: bool = False,
+            learning: bool = True,
+            u_rest: Union[float, torch.Tensor] = 0,
+            tau_t: Union[float, torch.Tensor] = 5,
+            resistance: Union[float, torch.Tensor] = 1,
+            threshold: Union[float, torch.Tensor] = 30,
+            sharpness: Union[float, torch.Tensor] = 0, #
+            theta_rh: Union[float, torch.Tensor] = 0,
+            **kwargs
     ) -> None:
         super().__init__(
             shape=shape,
@@ -443,67 +449,20 @@ class ELIFPopulation(NeuralPopulation):
             trace_scale=trace_scale,
             is_inhibitory=is_inhibitory,
             learning=learning,
+            u_rest=u_rest,
+            tau_t=tau_t,
+            resistance=resistance,
+            threshold=threshold
         )
+        self.sharpness = torch.tensor(sharpness)
+        self.theta_rh = torch.tensor(theta_rh)
 
-        """
-        TODO.
-
-        1. Add the required parameters.
-        2. Fill the body accordingly.
-        """
-
-    def forward(self, traces: torch.Tensor) -> None:
-        """
-        TODO.
-
-        1. Make use of other methods to fill the body. This is the main method\
-           responsible for one step of neuron simulation.
-        2. You might need to call the method from parent class.
-        """
-        pass
-
-    def compute_potential(self) -> None:
-        """
-        TODO.
-
-        Implement the neural dynamics for computing the potential of ELIF\
-        neurons. The method can either make changes to attributes directly or\
-        return the result for further use.
-        """
-        pass
-
-    def compute_spike(self) -> None:
-        """
-        TODO.
-
-        Implement the spike condition. The method can either make changes to
-        attributes directly or return the result for further use.
-        """
-        pass
-
-    @abstractmethod
-    def refractory_and_reset(self) -> None:
-        """
-        TODO.
-
-        Implement the refractory and reset conditions. The method can either\
-        make changes to attributes directly or return the computed value for\
-        further use.
-        """
-        pass
-
-    @abstractmethod
-    def compute_decay(self) -> None:
-        """
-        TODO.
-
-        Implement the dynamics of decays. You might need to call the method from
-        parent class.
-        """
-        pass
+    def compute_decay(self) -> torch.Tensor:
+        exponential_part = self.sharpness * torch.exp((self.u - self.theta_rh) / self.sharpness)
+        return super().compute_decay() + exponential_part
 
 
-class AELIFPopulation(NeuralPopulation):
+class AELIFPopulation(ELIFPopulation):
     """
     Layer of Adaptive Exponential Leaky Integrate and Fire neurons.
 
@@ -514,16 +473,27 @@ class AELIFPopulation(NeuralPopulation):
     Note: You can use ELIFPopulation as parent class as well.
     """
 
+    RB_ADAPTION = "w"
+
     def __init__(
-        self,
-        shape: Iterable[int],
-        spike_trace: bool = True,
-        additive_spike_trace: bool = True,
-        tau_s: Union[float, torch.Tensor] = 10.,
-        trace_scale: Union[float, torch.Tensor] = 1.,
-        is_inhibitory: bool = False,
-        learning: bool = True,
-        **kwargs
+            self,
+            shape: Iterable[int],
+            spike_trace: bool = True,
+            additive_spike_trace: bool = True,
+            tau_s: Union[float, torch.Tensor] = 10.,
+            trace_scale: Union[float, torch.Tensor] = 1.,
+            is_inhibitory: bool = False,
+            learning: bool = True,
+            u_rest: Union[float, torch.Tensor] = 0,
+            tau_t: Union[float, torch.Tensor] = 5,
+            resistance: Union[float, torch.Tensor] = 1,
+            threshold: Union[float, torch.Tensor] = 30,
+            sharpness: Union[float, torch.Tensor] = 0, #
+            theta_rh: Union[float, torch.Tensor] = 0,
+            tau_w: Union[float, torch.Tensor] = 1, #
+            b: Union[float, torch.Tensor] = 0,
+            a: Union[float, torch.Tensor] = 0,
+            **kwargs
     ) -> None:
         super().__init__(
             shape=shape,
@@ -533,61 +503,37 @@ class AELIFPopulation(NeuralPopulation):
             trace_scale=trace_scale,
             is_inhibitory=is_inhibitory,
             learning=learning,
+            u_rest=u_rest,
+            tau_t=tau_t,
+            resistance=resistance,
+            threshold=threshold,
+            sharpness=sharpness,
+            theta_rh=theta_rh,
         )
+        self.tau_w = torch.tensor(tau_w)
+        self.b = torch.tensor(b)
+        self.a = torch.tensor(a)
 
-        """
-        TODO.
+        self.register_buffer(self.RB_ADAPTION, torch.tensor(0)) # Single adaption variabel
 
-        1. Add the required parameters.
-        2. Fill the body accordingly.
-        """
+    def forward(self, current: torch.Tensor) -> None:
+        super().forward(current)
+        self.w = self.compute_adaption()
 
-    def forward(self, traces: torch.Tensor) -> None:
-        """
-        TODO.
+    def compute_adaption(self) -> torch.Tensor:
+        if self.s:
+            spike_coefficient = self.b * self.tau_w
+        else:
+            spike_coefficient = 0
 
-        1. Make use of other methods to fill the body. This is the main method\
-           responsible for one step of neuron simulation.
-        2. You might need to call the method from parent class.
-        """
-        pass
+        subthreshold_adaption = self.a * (self.u - self.u_rest)
+        delta_w = subthreshold_adaption - self.w + spike_coefficient
 
-    def compute_potential(self) -> None:
-        """
-        TODO.
+        return self.w + self.dt * delta_w / self.tau_w
 
-        Implement the neural dynamics for computing the potential of adaptive\
-        ELIF neurons. The method can either make changes to attributes directly\
-        or return the result for further use.
-        """
-        pass
+    def compute_delta_u(self) -> torch.Tensor:
+        c_part = (self.resistance * self.current)
+        adaption_part = self.resistance * self.w
+        return (self.compute_decay() - adaption_part + c_part) / self.tau_t
 
-    def compute_spike(self) -> None:
-        """
-        TODO.
 
-        Implement the spike condition. The method can either make changes to\
-        attributes directly or return the result for further use.
-        """
-        pass
-
-    @abstractmethod
-    def refractory_and_reset(self) -> None:
-        """
-        TODO.
-
-        Implement the refractory and reset conditions. The method can either\
-        make changes to attributes directly or return the computed value for\
-        further use.
-        """
-        pass
-
-    @abstractmethod
-    def compute_decay(self) -> None:
-        """
-        TODO.
-
-        Implement the dynamics of decays. You might need to call the method from
-        parent class.
-        """
-        pass

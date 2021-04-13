@@ -20,9 +20,17 @@ class AbstractPlotter(ABC):
 
 class PotentialTimePlotter(AbstractPlotter):
     @staticmethod
-    def plot(ax: Axes, monitor: Union[Monitor, None], time_unit=None, spikes: bool = False, **kwargs) -> Axes:
+    def plot(
+            ax: Axes,
+            monitor: Union[Monitor, None],
+            time_unit: Union[str, None] = None,
+            spikes: bool = False,
+            title: Union[str, None] = None,
+            **kwargs
+    ) -> Axes:
+        title_appendible = f" ({title})" if title else ""
         time_unit = f" ({time_unit})" if time_unit else ""
-        ax.set_title("Electric Potential")
+        ax.set_title("Electric Potential" + title_appendible)
         ax.set_xlabel("time" + time_unit)
         ax.set_ylabel("U(time)")
         u_vector = monitor.get("u")
@@ -30,20 +38,18 @@ class PotentialTimePlotter(AbstractPlotter):
         ax.plot(time_vector, u_vector)
 
         if spikes:
-            PotentialTimePlotter.plot_spikes(
-                monitor,
-                ax,
-                u_vector.min(),
-                u_vector.max(),
-            )
+            SpikePlotter.plot(ax, monitor, u_vector.min(), u_vector.max())
         return ax
 
+
+class SpikePlotter(AbstractPlotter):
     @staticmethod
-    def plot_spikes(monitor: Monitor, ax: Axes, min: float, max: float):
+    def plot(ax: Axes, monitor: Union[Monitor, None], min: float, max: float, **kwargs) -> Axes:
         spike_points = monitor.get("s")
+        times = monitor.get("time")
         for spike in spike_points.nonzero(as_tuple=True)[0]:
             ax.vlines(
-                spike,
+                times[spike],
                 min,
                 max,
                 linestyles="dashed",
@@ -55,7 +61,7 @@ class PotentialTimePlotter(AbstractPlotter):
 
 class CurrentTimePlotter(AbstractPlotter):
     @staticmethod
-    def plot(ax: Axes, monitor: Union[Monitor, None], time_unit=None, **kwargs) -> Axes:
+    def plot(ax: Axes, monitor: Union[Monitor, None], time_unit: Union[str, None] = None, **kwargs) -> Axes:
         time_unit = f" ({time_unit})" if time_unit else ""
         ax.set_title("Electric Current")
         ax.set_xlabel("time" + time_unit)
@@ -78,9 +84,12 @@ class FIPlotter(AbstractPlotter):
             current_from: Union[int, float] = 1,
             time_step: Union[int, float, None] = 1,
             time: Union[int, float] = 1000,
+            title: Union[str, None] = None,
             **kwargs
     ) -> Axes:
-        ax.set_title("F-I")
+        title_appendible = f" ({title})" if title else ""
+
+        ax.set_title("F-I" + title_appendible)
         ax.set_xlabel("I(time)")
         ax.set_ylabel("f=1/T")
 
@@ -133,4 +142,22 @@ class FIPlotter(AbstractPlotter):
         spikes_tensor = monitor.get("s")
         spikes_number = spikes_tensor.sum()
         return spikes_number
+
+
+class AdaptionTimePlotter(AbstractPlotter):
+    @staticmethod
+    def plot(ax: Axes, monitor: Union[Monitor, None], time_unit: Union[str, None] = None, spikes: bool = False, **kwargs) -> Axes:
+        time_unit = f" ({time_unit})" if time_unit else ""
+        ax.set_title("Adaption")
+        ax.set_xlabel("time" + time_unit)
+        ax.set_ylabel("W")
+        w_vector = monitor.get("w")
+        ax.plot(
+            monitor.get("time"),
+            w_vector
+        )
+
+        if spikes:
+            SpikePlotter.plot(ax, monitor, w_vector.min(), w_vector.max())
+        return ax
 
