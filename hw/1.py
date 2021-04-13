@@ -31,6 +31,8 @@ def get_result_from_vector(
         neuron.forward(i[t])
         monitor.record()
 
+    monitor.get("u")
+
     plot = Plot(monitor, shape=(2, 4), grid_spec=True, figsize=(10, 5), title=title)
     plot.plot(CurrentTimePlotter, x=0, y=0, y_until=4, time_unit="ms") \
         .plot(PotentialTimePlotter, x=1, y=0, y_until=4, time_unit="ms", spikes=True) \
@@ -45,7 +47,8 @@ def get_result_from_vector(
 def get_result_from_step_function(
         current_value: float,
         neuron: LIFPopulation,
-        time, noise_value: float = 0,
+        time,
+        noise_value: float = 0,
         dt: float = 1
 ):
     size = int(time / dt)
@@ -82,8 +85,10 @@ def do_for_neuron(neuron):
 
     plot = Plot(figsize=(5, 5))
     plot.plot(FIPlotter, neuron=neuron, current_to=30) \
-        .make_tight() \
-        .save(f"hw1/{pre_file}-FI.png")
+        .make_tight()
+
+    if save_file:
+        plot.save(f"hw1/{pre_file}-FI.png")
 
     get_result_from_noisy_current(neuron, 1000, 5)
     get_result_from_noisy_current(neuron, 1000, 50)
