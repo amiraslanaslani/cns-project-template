@@ -9,6 +9,8 @@ from typing import Union, Iterable
 
 import torch
 
+from cnsproject.utils import population_type
+
 
 class NeuralPopulation(torch.nn.Module):
     """
@@ -78,6 +80,7 @@ class NeuralPopulation(torch.nn.Module):
     """
 
     RB_SPIKES = "s"
+    RB_POTENTIAL = "u"
 
     def __init__(
         self,
@@ -86,7 +89,7 @@ class NeuralPopulation(torch.nn.Module):
         additive_spike_trace: bool = True,
         tau_s: Union[float, torch.Tensor] = 15.,
         trace_scale: Union[float, torch.Tensor] = 1.,
-        is_inhibitory: bool = False,
+        is_inhibitory: Union[torch.Tensor, None] = None,
         learning: bool = True,
         **kwargs
     ) -> None:
@@ -108,12 +111,20 @@ class NeuralPopulation(torch.nn.Module):
 
             self.register_buffer("trace_decay", torch.empty_like(self.tau_s))
 
-        self.is_inhibitory = is_inhibitory
+        if is_inhibitory is None:
+            self.is_inhibitory = population_type(
+                size=self.n,
+                inhibitory_ratio=0
+            )
+        else:
+            self.is_inhibitory = is_inhibitory
+
         self.learning = learning
 
         # You can use `torch.Tensor()` instead of `torch.zeros(*shape, dtype=torch.bool)` if \
         # `reset_state_variables` is intended to be called before every simulation.
         self.register_buffer(self.RB_SPIKES, torch.zeros(*self.shape, dtype=torch.bool))
+        self.register_buffer(self.RB_POTENTIAL, torch.full((*self.shape,), 0))
         self.dt = None
 
     @abstractmethod
@@ -305,7 +316,6 @@ class LIFPopulation(NeuralPopulation):
 
     RB_CURRENT = "current"
     RB_TIME = "time"
-    RB_POTENTIAL = "u"
 
     def __init__(
         self,
@@ -338,9 +348,10 @@ class LIFPopulation(NeuralPopulation):
         self.resistance = torch.tensor(resistance)
         self.threshold = torch.tensor(threshold)
 
-        self.register_buffer(self.RB_POTENTIAL, self.u_rest)
         self.register_buffer(self.RB_TIME, torch.tensor(0))
-        self.register_buffer(self.RB_CURRENT, torch.tensor(0))
+        self.register_buffer(self.RB_CURRENT, torch.zeros(*self.shape))
+
+        setattr(self, self.RB_POTENTIAL, torch.full((*self.shape,), self.u_rest))
 
     def set_timestep(self, dt: Union[float, torch.Tensor]) -> None:
         """
@@ -372,6 +383,7 @@ class LIFPopulation(NeuralPopulation):
         None
 
         """
+        super().forward(current)
         self.current = current
         self.u = self.compute_potential()
         self.compute_spike()
@@ -395,17 +407,10 @@ class LIFPopulation(NeuralPopulation):
     def compute_decay(self) -> torch.Tensor:
         return -(self.u - self.u_rest)
 
-    def compute_spike(self) -> bool:
-        if self.u >= self.threshold:
-            self.refractory_and_reset()
-            return True
-        else:
-            self.s = torch.tensor(False)
-            return False
-
-    def refractory_and_reset(self) -> None:
-        self.u = self.u_rest
-        self.s = torch.tensor(True)
+    def compute_spike(self) -> None:
+        indexes = self.u >= self.threshold
+        self.s = indexes
+        self.u[indexes] = self.u_rest.float()
 
     def reset_state_variables(self) -> None:
         super().reset_state_variables()

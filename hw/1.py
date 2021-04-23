@@ -33,7 +33,7 @@ def get_result_from_vector(
 
     monitor.get("u")
 
-    plot = Plot(monitor, shape=(2, 4), grid_spec=True, figsize=(10, 5), title=title)
+    plot = Plot(monitor, shape=(2, 4), grid_spec=True, fig_size=(10, 5), title=title)
     plot.plot(CurrentTimePlotter, x=0, y=0, y_until=4, time_unit="ms") \
         .plot(PotentialTimePlotter, x=1, y=0, y_until=4, time_unit="ms", spikes=True) \
         .make_tight()
@@ -83,7 +83,7 @@ def do_for_neuron(neuron):
     get_result_from_step_function(10, neuron, 1000)
     get_result_from_step_function(15, neuron, 1000)
 
-    plot = Plot(figsize=(5, 5))
+    plot = Plot(fig_size=(5, 5))
     plot.plot(FIPlotter, neuron=neuron, current_to=30) \
         .make_tight()
 

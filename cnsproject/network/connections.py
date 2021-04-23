@@ -68,12 +68,17 @@ class AbstractConnection(ABC, torch.nn.Module):
     def __init__(
         self,
         pre: NeuralPopulation,
-        post: NeuralPopulation,
+        post: NeuralPopulation = None,
         lr: Union[float, Sequence[float]] = None,
         weight_decay: float = 0.0,
+        j0: float = 10,
+        s0: float = 30,
         **kwargs
     ) -> None:
         super().__init__()
+
+        if post is None:
+            post = pre
 
         assert isinstance(pre, NeuralPopulation), \
             "Pre is not a NeuralPopulation instance"
@@ -82,6 +87,7 @@ class AbstractConnection(ABC, torch.nn.Module):
 
         self.pre = pre
         self.post = post
+        N = post.shape[0]
 
         self.weight_decay = weight_decay
 
@@ -99,8 +105,25 @@ class AbstractConnection(ABC, torch.nn.Module):
         self.wmax = kwargs.get('wmax', 1.)
         self.norm = kwargs.get('norm', None)
 
+        w = kwargs.get(
+            'weight',
+            torch.normal(
+                mean=j0 / N,
+                std=s0 / N,
+                size=(*pre.shape, *post.shape)
+            ).abs()
+        )
+        w[~ pre.is_inhibitory, :] *= -1
+        self.register_buffer('w', w)
+
+        self.mask = self.compute_mask(self.w.shape, **kwargs)
+        self.w[~ self.mask] = 0
+
     @abstractmethod
-    def compute(self, s: torch.Tensor) -> None:
+    def compute_mask(self, shape: torch.Tensor, **kwargs) -> torch.Tensor:
+        pass
+
+    def compute(self) -> None:
         """
         Compute the post-synaptic neural population activity based on the given\
         spikes of the pre-synaptic population.
@@ -115,9 +138,17 @@ class AbstractConnection(ABC, torch.nn.Module):
         None
 
         """
-        pass
+        spikes = getattr(self.post, NeuralPopulation.RB_SPIKES)
+        spikes_effect = self.w.clone().detach()
+        spikes_effect[~ spikes, :] = 0
+        spikes_effect = spikes_effect.sum(dim=0)
 
-    @abstractmethod
+        setattr(
+            self.post,
+            NeuralPopulation.RB_POTENTIAL,
+            getattr(self.post, NeuralPopulation.RB_POTENTIAL) + spikes_effect
+        )
+
     def update(self, **kwargs) -> None:
         """
         Compute connection's learning rule and weight update.
@@ -167,7 +198,7 @@ class DenseConnection(AbstractConnection):
     def __init__(
         self,
         pre: NeuralPopulation,
-        post: NeuralPopulation,
+        post: NeuralPopulation = None,
         lr: Union[float, Sequence[float]] = None,
         weight_decay: float = 0.0,
         **kwargs
@@ -179,30 +210,9 @@ class DenseConnection(AbstractConnection):
             weight_decay=weight_decay,
             **kwargs
         )
-        """
-        TODO.
 
-        1. Add more parameters if needed.
-        2. Fill the body accordingly.
-        """
-
-    def compute(self, s: torch.Tensor) -> None:
-        """
-        TODO.
-
-        Implement the computation of post-synaptic population activity given the
-        activity of the pre-synaptic population.
-        """
-        pass
-
-    def update(self, **kwargs) -> None:
-        """
-        TODO.
-
-        Update the connection weights based on the learning rule computations.\
-        You might need to call the parent method.
-        """
-        pass
+    def compute_mask(self, shape: torch.Tensor, **kwargs) -> torch.Tensor:
+        return torch.full(shape, True)
 
     def reset_state_variables(self) -> None:
         """
@@ -224,9 +234,10 @@ class RandomConnection(AbstractConnection):
     def __init__(
         self,
         pre: NeuralPopulation,
-        post: NeuralPopulation,
+        post: NeuralPopulation = None,
         lr: Union[float, Sequence[float]] = None,
         weight_decay: float = 0.0,
+        probability: Union[float, torch.Tensor] = 0.5,
         **kwargs
     ) -> None:
         super().__init__(
@@ -234,39 +245,20 @@ class RandomConnection(AbstractConnection):
             post=post,
             lr=lr,
             weight_decay=weight_decay,
+            prob=probability,
             **kwargs
         )
-        """
-        TODO.
 
-        1. Add more parameters if needed.
-        2. Fill the body accordingly.
-        """
-
-    def compute(self, s: torch.Tensor) -> None:
-        """
-        TODO.
-
-        Implement the computation of post-synaptic population activity given the
-        activity of the pre-synaptic population.
-        """
-        pass
-
-    def update(self, **kwargs) -> None:
-        """
-        TODO.
-
-        Update the connection weights based on the learning rule computations.\
-        You might need to call the parent method.
-        """
-        pass
+    def compute_mask(self, shape: torch.Tensor, prob: torch.Tensor, **kwargs) -> torch.Tensor:
+        size = shape[0] * shape[1]
+        select = int(size * prob)
+        indexes = torch.randperm(size)[:select]
+        mask = torch.full((size,), False)
+        mask[indexes] = True
+        mask = mask.reshape(shape[0], shape[1])
+        return mask
 
     def reset_state_variables(self) -> None:
-        """
-        TODO.
-
-        Reset all the state variables of the connection.
-        """
         pass
 
 

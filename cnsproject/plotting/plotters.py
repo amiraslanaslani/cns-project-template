@@ -7,7 +7,7 @@ import copy
 import torch
 
 from ..network.monitors import Monitor
-from ..network.neural_populations import NeuralPopulation
+from ..network.neural_populations import NeuralPopulation, LIFPopulation
 from ..network.connections import AbstractConnection
 
 
@@ -36,6 +36,7 @@ class PotentialTimePlotter(AbstractPlotter):
         u_vector = monitor.get("u")
         time_vector = monitor.get("time")
         ax.plot(time_vector, u_vector)
+        ax.set_xlim(time_vector.min(), time_vector.max())
 
         if spikes:
             SpikePlotter.plot(ax, monitor, u_vector.min(), u_vector.max())
@@ -66,8 +67,10 @@ class CurrentTimePlotter(AbstractPlotter):
         ax.set_title("Electric Current")
         ax.set_xlabel("time" + time_unit)
         ax.set_ylabel("I(time)")
+        time = monitor.get("time")
+        ax.set_xlim(time.min(), time.max())
         ax.plot(
-            monitor.get("time"),
+            time,
             monitor.get("current")
         )
         return ax
@@ -129,7 +132,7 @@ class FIPlotter(AbstractPlotter):
 
         monitor = Monitor(
             neuron,
-            state_variables=["s"]
+            state_variables=[NeuralPopulation.RB_SPIKES]
         )
         monitor.set_time_steps(time, time_step)
         monitor.reset_state_variables()
@@ -139,14 +142,20 @@ class FIPlotter(AbstractPlotter):
             neuron.forward(current_value)
             monitor.record()
 
-        spikes_tensor = monitor.get("s")
+        spikes_tensor = monitor.get(NeuralPopulation.RB_SPIKES)
         spikes_number = spikes_tensor.sum()
         return spikes_number
 
 
 class AdaptionTimePlotter(AbstractPlotter):
     @staticmethod
-    def plot(ax: Axes, monitor: Union[Monitor, None], time_unit: Union[str, None] = None, spikes: bool = False, **kwargs) -> Axes:
+    def plot(
+            ax: Axes,
+            monitor: Union[Monitor, None],
+            time_unit: Union[str, None] = None,
+            spikes: bool = False,
+            **kwargs
+    ) -> Axes:
         time_unit = f" ({time_unit})" if time_unit else ""
         ax.set_title("Adaption")
         ax.set_xlabel("time" + time_unit)
@@ -159,5 +168,52 @@ class AdaptionTimePlotter(AbstractPlotter):
 
         if spikes:
             SpikePlotter.plot(ax, monitor, w_vector.min(), w_vector.max())
+        return ax
+
+
+class RasterPlotter(AbstractPlotter):
+    @staticmethod
+    def plot(
+            ax: Axes,
+            monitor: Union[Monitor, None],
+            inhibitories: Union[torch.Tensor, None] = None,
+            **kwargs
+    ) -> Axes:
+        spikes = monitor.get(NeuralPopulation.RB_SPIKES)
+        time = monitor.get(LIFPopulation.RB_TIME)
+
+        if inhibitories is None:
+            inhibitories = torch.full((spikes.shape[1],), False)
+
+        ax.set_title("Raster Plot")
+        ax.set_xlabel("time")
+        temp_spikes_exc = spikes.clone().detach()
+        temp_spikes_inh = spikes.clone().detach()
+        temp_spikes_exc[:, ~ inhibitories] = 0
+        temp_spikes_inh[:, inhibitories] = 0
+        inh_xs, inh_ys = temp_spikes_inh.nonzero(as_tuple=True)
+        exc_xs, hib_ys = temp_spikes_exc.nonzero(as_tuple=True)
+        ax.scatter(time[exc_xs], hib_ys, label="Excitatory", s=5)
+        ax.scatter(time[inh_xs], inh_ys, label="Inhibitory", s=5)
+        ax.set_xlim(time.min(), time.max())
+        ax.legend()
+        return ax
+
+
+class ActivityPlotter(AbstractPlotter):
+    @staticmethod
+    def plot(
+            ax: Axes,
+            monitor: Union[Monitor, None],
+            inhibitories: Union[torch.Tensor, None] = None,
+            **kwargs
+    ) -> Axes:
+        ax.set_title("Activity")
+        ax.set_xlabel("time")
+        spikes = monitor.get(NeuralPopulation.RB_SPIKES)
+        activity = spikes.int().sum(dim=1) / spikes.shape[1]
+        time = monitor.get(LIFPopulation.RB_TIME)
+        ax.set_xlim(time.min(), time.max())
+        ax.plot(activity)
         return ax
 

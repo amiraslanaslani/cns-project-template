@@ -32,7 +32,7 @@ class Plot:
             monitor: Union[Monitor, None] = None,
             shape: Tuple[int, int] = (1, 1),
             grid_spec: bool = False,
-            figsize: Tuple[int, int] = (10, 10),
+            fig_size: Tuple[int, int] = (10, 10),
             title: Union[str, None] = None
     ):
         self.monitor = monitor
@@ -41,18 +41,18 @@ class Plot:
         self.grid_axs = []
 
         if grid_spec:
-            self.fig = plt.figure(figsize=figsize)
+            self.fig = plt.figure(figsize=fig_size)
             self.grid = plt.GridSpec(shape[0], shape[1])
             self.axs = None
         else:
             self.grid = None
-            self.fig, self.axs = plt.subplots(shape[0], shape[1], figsize=figsize)
+            self.fig, self.axs = plt.subplots(shape[0], shape[1], figsize=fig_size)
             if isinstance(self.axs, Axes):
                 self.axs = np.array(self.axs)
             self.axs = self.axs.reshape(shape[0], shape[1])
 
         if not (title is None):
-            self.fig.suptitle(title)
+            self.fig.suptitle(title, fontweight='bold')
 
     def plot(
             self,

@@ -39,7 +39,7 @@ def get_result_from_vector(
         ]
     )
 
-    plot = Plot(monitor, shape=(1 + (1 if draw_current else 0), 4), grid_spec=True, figsize=(10, 3 * (2 if draw_current else 1)))
+    plot = Plot(monitor, shape=(1 + (1 if draw_current else 0), 4), grid_spec=True, fig_size=(10, 3 * (2 if draw_current else 1)))
     plot.plot(PotentialTimePlotter, x=0, y=0, y_until=4, time_unit="ms", spikes=True, title=f"model: {neuron.__class__.__name__}" + ("" if draw_current else f"I = {current_vector.max()}"))
 
     if draw_current:
@@ -73,7 +73,7 @@ def do_for_all(
                     f"{model.__name__}-{param_index}-{current_vector.max()}.png"
                 )
 
-            plot = Plot(figsize=(5, 5))
+            plot = Plot(fig_size=(5, 5))
             plot.plot(FIPlotter, neuron=neuron, current_to=30, title=f"model: {neuron.__class__.__name__}") \
                 .make_tight()
 
