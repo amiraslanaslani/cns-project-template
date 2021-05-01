@@ -1,12 +1,13 @@
-
 from abc import abstractmethod, ABC
 from matplotlib.axes import Axes
-from typing import Union
+from typing import Union, Tuple
 import copy
+from functools import reduce
+from operator import mul
 
 import torch
 
-from ..network.monitors import Monitor
+from ..network.monitors import Monitor, AbstractMonitor
 from ..network.neural_populations import NeuralPopulation, LIFPopulation
 from ..network.connections import AbstractConnection
 
@@ -14,15 +15,47 @@ from ..network.connections import AbstractConnection
 class AbstractPlotter(ABC):
     @staticmethod
     @abstractmethod
-    def plot(ax: Axes, monitor: Union[Monitor, None], **kwargs) -> Axes:
+    def plot(ax: Axes, monitor: Union[AbstractMonitor, None], **kwargs) -> Axes:
         pass
+
+
+class SimplePlotter(AbstractPlotter):
+    @staticmethod
+    def plot(
+            ax: Axes,
+            monitor: Union[AbstractMonitor, None],
+            title: Union[str, None] = None,
+            xlabel: Union[str, None] = None,
+            ylabel: Union[str, None] = None,
+            xlim: Tuple[float, float] = None,
+            ylim: Tuple[float, float] = None,
+            x_name: str = "x",
+            y_name: str = None,
+            legend: bool = False,
+            draw: bool = True,
+            **kwargs
+    ) -> Axes:
+        ax.set_title(title) if title else None
+        ax.set_xlabel(xlabel) if xlabel else None
+        ax.set_ylabel(ylabel) if ylabel else None
+        ax.set_xlim(*xlim) if xlim else None
+        ax.set_ylim(*ylim) if ylim else None
+
+        if draw:
+            if y_name:
+                ax.plot(monitor.get(x_name), monitor.get(y_name), **kwargs)
+            else:
+                ax.plot(monitor.get(x_name), **kwargs)
+
+        ax.legend() if legend else None
+        return ax
 
 
 class PotentialTimePlotter(AbstractPlotter):
     @staticmethod
     def plot(
             ax: Axes,
-            monitor: Union[Monitor, None],
+            monitor: Union[AbstractMonitor, None],
             time_unit: Union[str, None] = None,
             spikes: bool = False,
             title: Union[str, None] = None,
@@ -45,33 +78,42 @@ class PotentialTimePlotter(AbstractPlotter):
 
 class SpikePlotter(AbstractPlotter):
     @staticmethod
-    def plot(ax: Axes, monitor: Union[Monitor, None], min: float, max: float, **kwargs) -> Axes:
+    def plot(ax: Axes, monitor: Union[AbstractMonitor, None], min_value: float, max_value: float, **kwargs) -> Axes:
         spike_points = monitor.get("s")
         times = monitor.get("time")
         for spike in spike_points.nonzero(as_tuple=True)[0]:
             ax.vlines(
                 times[spike],
-                min,
-                max,
+                min_value,
+                max_value,
                 linestyles="dashed",
                 colors="red",
                 zorder=3,
                 linewidth=3
             )
+        return ax
 
 
 class CurrentTimePlotter(AbstractPlotter):
     @staticmethod
-    def plot(ax: Axes, monitor: Union[Monitor, None], time_unit: Union[str, None] = None, **kwargs) -> Axes:
+    def plot(
+            ax: Axes,
+            monitor: Union[AbstractMonitor, None],
+            time_unit: Union[str, None] = None,
+            current: torch.Tensor = None,
+            **kwargs
+    ) -> Axes:
         time_unit = f" ({time_unit})" if time_unit else ""
         ax.set_title("Electric Current")
         ax.set_xlabel("time" + time_unit)
         ax.set_ylabel("I(time)")
         time = monitor.get("time")
         ax.set_xlim(time.min(), time.max())
+        if current is None:
+            current = monitor.get("current")
         ax.plot(
             time,
-            monitor.get("current")
+            current
         )
         return ax
 
@@ -80,7 +122,7 @@ class FIPlotter(AbstractPlotter):
     @staticmethod
     def plot(
             ax: Axes,
-            monitor: Union[Monitor, None],
+            monitor: Union[AbstractMonitor, None],
             neuron: Union[NeuralPopulation, AbstractConnection, None],
             current_to: Union[int, float] = 20,
             step_size: Union[int, float] = 1,
@@ -151,7 +193,7 @@ class AdaptionTimePlotter(AbstractPlotter):
     @staticmethod
     def plot(
             ax: Axes,
-            monitor: Union[Monitor, None],
+            monitor: Union[AbstractMonitor, None],
             time_unit: Union[str, None] = None,
             spikes: bool = False,
             **kwargs
@@ -175,8 +217,9 @@ class RasterPlotter(AbstractPlotter):
     @staticmethod
     def plot(
             ax: Axes,
-            monitor: Union[Monitor, None],
+            monitor: Union[AbstractMonitor, None],
             inhibitories: Union[torch.Tensor, None] = None,
+            legend: bool = False,
             **kwargs
     ) -> Axes:
         spikes = monitor.get(NeuralPopulation.RB_SPIKES)
@@ -196,7 +239,8 @@ class RasterPlotter(AbstractPlotter):
         ax.scatter(time[exc_xs], hib_ys, label="Excitatory", s=5)
         ax.scatter(time[inh_xs], inh_ys, label="Inhibitory", s=5)
         ax.set_xlim(time.min(), time.max())
-        ax.legend()
+        if legend:
+            ax.legend()
         return ax
 
 
@@ -204,8 +248,10 @@ class ActivityPlotter(AbstractPlotter):
     @staticmethod
     def plot(
             ax: Axes,
-            monitor: Union[Monitor, None],
+            monitor: Union[AbstractMonitor, None],
             inhibitories: Union[torch.Tensor, None] = None,
+            bins: Union[int, None] = None,
+            y_scale: str = "symlog",
             **kwargs
     ) -> Axes:
         ax.set_title("Activity")
@@ -213,7 +259,13 @@ class ActivityPlotter(AbstractPlotter):
         spikes = monitor.get(NeuralPopulation.RB_SPIKES)
         activity = spikes.int().sum(dim=1) / spikes.shape[1]
         time = monitor.get(LIFPopulation.RB_TIME)
+        n = reduce(mul, time.shape)
         ax.set_xlim(time.min(), time.max())
-        ax.plot(activity)
-        return ax
+        ax.set_ylim(-0.1, 1)
+        ax.set_yscale(y_scale)
+        if not (bins is None):
+            activity = activity.reshape((bins, int(n / bins))).sum(axis=1)
+            time = torch.linspace(time.min(), time.max(), steps=bins)
+        ax.plot(time, activity)
 
+        return ax

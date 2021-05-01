@@ -4,10 +4,9 @@ from typing import List
 sys.path.append('../')
 
 from cnsproject.network.neural_populations import NeuralPopulation, LIFPopulation, ELIFPopulation, AELIFPopulation
-from cnsproject.network.monitors import Monitor
 from cnsproject.plotting.plotting import Plot
-from cnsproject.plotting.plotters import FIPlotter, CurrentTimePlotter, PotentialTimePlotter, AdaptionTimePlotter
-from cnsproject.utils import get_monitor_of_simulation, get_fixed_current
+from cnsproject.plotting.plotters import FIPlotter, CurrentTimePlotter, PotentialTimePlotter
+from cnsproject.utils.general import get_monitor_of_simulation, get_fixed_current
 
 import torch
 

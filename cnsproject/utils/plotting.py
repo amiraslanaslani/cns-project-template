@@ -1,7 +1,5 @@
 from typing import List, Union, Dict
 
-from numpy import select
-
 
 def param2title(parameter_set, selected: Union[List[str], Dict[str, str]]) -> str:
     result = ""

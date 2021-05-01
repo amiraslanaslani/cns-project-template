@@ -3,6 +3,7 @@ Module for monitoring objects.
 """
 
 from typing import Union, Iterable, Optional
+from abc import ABC, abstractmethod
 
 import torch
 
@@ -10,7 +11,16 @@ from .neural_populations import NeuralPopulation
 from .connections import AbstractConnection
 
 
-class Monitor:
+class AbstractMonitor(ABC):
+    @abstractmethod
+    def get(self, variable: str) -> torch.Tensor:
+        pass
+
+    def reset_state_variables(self) -> None:
+        pass
+
+
+class Monitor(AbstractMonitor):
     """
     Record desired state variables.
 
@@ -67,15 +77,19 @@ class Monitor:
         obj: Union[NeuralPopulation, AbstractConnection],
         state_variables: Iterable[str],
         device: Optional[str] = "cpu",
+        time: float = None,
+        dt: float = None
     ) -> None:
         self.obj = obj
         self.state_variables = state_variables
         self.time_steps = 0
         self.device = device
-
         self.recording = []
 
-    def set_time_steps(self, time: int, dt: float):
+        if not (time is None or dt is None):
+            self.set_time_steps(time, dt)
+
+    def set_time_steps(self, time: float, dt: float):
         """
         Set number of time steps to record.
 
@@ -89,6 +103,7 @@ class Monitor:
 
         """
         self.time_steps = int(time / dt)
+        self.reset_state_variables()
 
     def get(self, variable: str) -> torch.Tensor:
         """

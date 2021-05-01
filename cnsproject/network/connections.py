@@ -87,6 +87,7 @@ class AbstractConnection(ABC, torch.nn.Module):
 
         self.pre = pre
         self.post = post
+        self.lr = lr
         N = post.shape[0]
 
         self.weight_decay = weight_decay
@@ -138,7 +139,7 @@ class AbstractConnection(ABC, torch.nn.Module):
         None
 
         """
-        spikes = getattr(self.post, NeuralPopulation.RB_SPIKES)
+        spikes = getattr(self.pre, NeuralPopulation.RB_SPIKES)
         spikes_effect = self.w.clone().detach()
         spikes_effect[~ spikes, :] = 0
         spikes_effect = spikes_effect.sum(dim=0)
@@ -201,6 +202,8 @@ class DenseConnection(AbstractConnection):
         post: NeuralPopulation = None,
         lr: Union[float, Sequence[float]] = None,
         weight_decay: float = 0.0,
+        j0: float = 10,
+        s0: float = 30,
         **kwargs
     ) -> None:
         super().__init__(
@@ -208,6 +211,8 @@ class DenseConnection(AbstractConnection):
             post=post,
             lr=lr,
             weight_decay=weight_decay,
+            j0=j0,
+            s0=s0,
             **kwargs
         )
 
@@ -237,6 +242,8 @@ class RandomConnection(AbstractConnection):
         post: NeuralPopulation = None,
         lr: Union[float, Sequence[float]] = None,
         weight_decay: float = 0.0,
+        j0: float = 10,
+        s0: float = 30,
         probability: Union[float, torch.Tensor] = 0.5,
         **kwargs
     ) -> None:
@@ -245,6 +252,8 @@ class RandomConnection(AbstractConnection):
             post=post,
             lr=lr,
             weight_decay=weight_decay,
+            j0=j0,
+            s0=s0,
             prob=probability,
             **kwargs
         )
@@ -257,6 +266,20 @@ class RandomConnection(AbstractConnection):
         mask[indexes] = True
         mask = mask.reshape(shape[0], shape[1])
         return mask
+
+    def copy(self, pre=None, post=None):
+        result = RandomConnection(
+            pre=self.pre if pre is None else pre,
+            post=self.post if post is None else post,
+            lr=self.lr,
+            weight_decay=self.weight_decay
+        )
+        result.w = self.w
+        result.wmax = self.wmax
+        result.wmin = self.wmin
+        result.norm = self.norm
+        result.mask = self.mask
+        return result
 
     def reset_state_variables(self) -> None:
         pass

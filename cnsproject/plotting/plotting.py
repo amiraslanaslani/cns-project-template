@@ -22,14 +22,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from .plotters import AbstractPlotter
-from ..network.monitors import Monitor
+from ..network.monitors import AbstractMonitor
 
 
 class Plot:
 
     def __init__(
             self,
-            monitor: Union[Monitor, None] = None,
+            monitor: Union[AbstractMonitor, None] = None,
             shape: Tuple[int, int] = (1, 1),
             grid_spec: bool = False,
             fig_size: Tuple[int, int] = (10, 10),
@@ -61,7 +61,7 @@ class Plot:
             y: int = 0,
             x_until: Union[int, None] = None,
             y_until: Union[int, None] = None,
-            monitor: Monitor = None,
+            monitor: AbstractMonitor = None,
             **kwargs
     ) -> Plot:
         if monitor is None:

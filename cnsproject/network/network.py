@@ -19,10 +19,10 @@ class Network(torch.nn.Module):
 
     Examples
     --------
-    >>> from network.neural_populations import LIFPopulation
-    >>> from network.connections import DenseConnection
-    >>> from network.monitors import Monitor
-    >>> from network import Network
+    >>> from cnsproject.network.neural_populations import LIFPopulation
+    >>> from cnsproject.network.connections import DenseConnection
+    >>> from cnsproject.network.monitors import Monitor
+    >>> from cnsproject.network import Network
     >>> inp = InputPopulation(shape=(10,))
     >>> out = LIFPopulation(shape=(2,))
     >>> synapse = DenseConnection(inp, out)
@@ -49,8 +49,6 @@ class Network(torch.nn.Module):
 
     Arguments
     ---------
-    dt : float, Optional
-        Specify simulation timestep. The default is 1.0.
     learning: bool, Optional
         Whether to allow weight update and learning. The default is True.
     reward : AbstractReward, Optional
@@ -63,15 +61,12 @@ class Network(torch.nn.Module):
 
     def __init__(
         self,
-        dt: float = 1.0,
         learning: bool = True,
         reward: Optional[AbstractReward] = None,
         decision: Optional[AbstractDecision] = None,
         **kwargs
     ) -> None:
         super().__init__()
-
-        self.dt = dt
 
         self.layers = {}
         self.connections = {}
@@ -82,8 +77,11 @@ class Network(torch.nn.Module):
         # Make sure that arguments of your reward and decision classes do not
         # share same names. Their arguments are passed to the network as its
         # keyword arguments.
-        self.reward = reward(**kwargs)
-        self.decision = decision(**kwargs)
+        if not (reward is None):
+            self.reward = reward(**kwargs)
+
+        if not (decision is None):
+            self.decision = decision(**kwargs)
 
     def add_layer(self, layer: NeuralPopulation, name: str) -> None:
         """
@@ -105,7 +103,6 @@ class Network(torch.nn.Module):
         self.add_module(name, layer)
 
         layer.train(self.learning)
-        layer.dt = self.dt
 
     def add_connection(
         self,
@@ -135,7 +132,6 @@ class Network(torch.nn.Module):
         self.add_module(f"{pre}_to_{post}", connection)
 
         connection.train(self.learning)
-        connection.dt = self.dt
 
     def add_monitor(self, monitor: Monitor, name: str) -> None:
         """
@@ -154,13 +150,15 @@ class Network(torch.nn.Module):
 
         """
         self.monitors[name] = monitor
-        monitor.dt = self.dt
 
     def run(
         self,
-        time: int,
-        inputs: Dict[str, torch.Tensor] = {},
+        time: float,
+        dt: float = 1.0,
+        inputs: Dict[str, torch.Tensor] = {},  # Spikes
+        currents: Dict[str, torch.Tensor] = {},
         one_step: bool = False,
+        random_factor: float = 0,
         **kwargs
     ) -> None:
         """
@@ -183,10 +181,15 @@ class Network(torch.nn.Module):
 
         Parameters
         ----------
-        time : int
+        time : float
             Simulation time.
+        dt : float, Optional
+            Specify simulation timestep. The default is 1.0.
         inputs : Dict[str, torch.Tensor], optional
             Mapping of input layer names to their input spike tensors. The\
+            default is {}.
+        currents : Dict[str, torch.Tensor], optional
+            Mapping of input layer names to their input current tensors. The\
             default is {}.
         one_step : bool, optional
             Whether to propagate the inputs all the way through the network in\
@@ -216,6 +219,31 @@ class Network(torch.nn.Module):
         unclamps = kwargs.get("unclamp", {})
         masks = kwargs.get("masks", {})
 
+        # Set time and dt for all instances
+        for monitor in self.monitors:
+            self.monitors[monitor].set_time_steps(time, dt)
+
+        for layer in self.layers:
+            self.layers[layer].set_timestep(dt)
+
+        for connection in self.connections:
+            self.connections[connection].dt = dt
+
+        time_steps = int(time / dt)
+        for time_step in range(time_steps):
+            if time_step % 1000 == 0:
+                print(f"STEP {time_step}")
+            for layer in self.layers:
+                if layer in currents:
+                    current = currents[layer][time_step]
+                else:
+                    current = torch.tensor(0)
+                self.layers[layer].forward(current, random=random_factor)
+            for connection in self.connections:
+                self.connections[connection].compute()
+            for monitor in self.monitors:
+                self.monitors[monitor].record()
+
     def reset_state_variables(self) -> None:
         """
         Reset all internal state variables.
@@ -234,7 +262,7 @@ class Network(torch.nn.Module):
         for monitor in self.monitors:
             self.monitors[monitor].reset_state_variables()
 
-    def train(self, mode: bool = True) -> "torch.nn.Moudle":
+    def train(self, mode: bool = True) -> torch.nn.Module:
         """
         Set the population's training mode.
 
@@ -251,3 +279,4 @@ class Network(torch.nn.Module):
         """
         self.learning = mode
         return super().train(mode)
+

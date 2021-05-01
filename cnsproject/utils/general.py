@@ -10,9 +10,10 @@ ion would be to write them in this file but it is not a must and you can define\
 a separate module/package for them.
 """
 
-from typing import List, Union
+from typing import List, Union, Dict
 
 import torch
+
 
 
 def get_fixed_current(value: float, time: float, dt: float, start=1, end=1) -> torch.Tensor:
@@ -54,4 +55,3 @@ def population_type(size: int, inhibitory_ratio: float=0.2) -> torch.Tensor:
 #         monitor.record()
 #
 #     return monitor
-

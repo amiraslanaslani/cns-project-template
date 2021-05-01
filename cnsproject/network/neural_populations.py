@@ -9,7 +9,7 @@ from typing import Union, Iterable
 
 import torch
 
-from cnsproject.utils import population_type
+from cnsproject.utils.general import population_type
 
 
 class NeuralPopulation(torch.nn.Module):
@@ -127,6 +127,22 @@ class NeuralPopulation(torch.nn.Module):
         self.register_buffer(self.RB_POTENTIAL, torch.full((*self.shape,), 0))
         self.dt = None
 
+    def set_timestep(self, dt: Union[float, torch.Tensor]) -> None:
+        """
+        Time step length setter.
+
+        Parameters
+        ----------
+        dt : Union[float, torch.Tensor]
+            Time step length.
+
+        Returns
+        -------
+        None
+
+        """
+        self.dt = torch.tensor(dt)
+
     @abstractmethod
     def forward(self, traces: torch.Tensor) -> None:
         """
@@ -150,7 +166,6 @@ class NeuralPopulation(torch.nn.Module):
             else:
                 self.traces.masked_fill_(self.s, 1)
 
-    @abstractmethod
     def compute_potential(self) -> None:
         """
         Compute the potential of neurons in the population.
@@ -162,7 +177,6 @@ class NeuralPopulation(torch.nn.Module):
         """
         pass
 
-    @abstractmethod
     def compute_spike(self) -> None:
         """
         Compute the spike tensor.
@@ -174,7 +188,6 @@ class NeuralPopulation(torch.nn.Module):
         """
         pass
 
-    @abstractmethod
     def refractory_and_reset(self) -> None:
         """
         Refractor and reset the neurons.
@@ -186,7 +199,6 @@ class NeuralPopulation(torch.nn.Module):
         """
         pass
 
-    @abstractmethod
     def compute_decay(self) -> None:
         """
         Set the decays.
@@ -324,9 +336,9 @@ class LIFPopulation(NeuralPopulation):
         additive_spike_trace: bool = True,
         tau_s: Union[float, torch.Tensor] = 10.,
         trace_scale: Union[float, torch.Tensor] = 1.,
-        is_inhibitory: bool = False,
+        is_inhibitory: Union[torch.Tensor, None] = None,
         learning: bool = True,
-        u_rest: Union[float, torch.Tensor] = 0, #
+        u_rest: Union[float, torch.Tensor] = -70, #
         tau_t: Union[float, torch.Tensor] = 5,
         resistance: Union[float, torch.Tensor] = 1,
         threshold: Union[float, torch.Tensor] = 30,
@@ -353,23 +365,7 @@ class LIFPopulation(NeuralPopulation):
 
         setattr(self, self.RB_POTENTIAL, torch.full((*self.shape,), self.u_rest))
 
-    def set_timestep(self, dt: Union[float, torch.Tensor]) -> None:
-        """
-        Time step length setter.
-
-        Parameters
-        ----------
-        dt : Union[float, torch.Tensor]
-            Time step length.
-
-        Returns
-        -------
-        None
-
-        """
-        self.dt = torch.tensor(dt)
-
-    def forward(self, current: torch.Tensor) -> None:
+    def forward(self, current: torch.Tensor, random: float = 0) -> None:
         """
         Simulate the neural population for a single step.
 
@@ -378,6 +374,9 @@ class LIFPopulation(NeuralPopulation):
         current : torch.Tensor
             Input electric current.
 
+        random : float, optional
+            Randomness coefficient
+
         Returns
         -------
         None
@@ -385,6 +384,10 @@ class LIFPopulation(NeuralPopulation):
         """
         super().forward(current)
         self.current = current
+        if random > 0:
+            self.current = torch.tensor(random) * torch.rand(self.n) + self.current
+            self.current[self.current < 0] = 0
+
         self.u = self.compute_potential()
         self.compute_spike()
         self.time = self.time + self.dt
@@ -436,7 +439,7 @@ class ELIFPopulation(LIFPopulation):
             additive_spike_trace: bool = True,
             tau_s: Union[float, torch.Tensor] = 10.,
             trace_scale: Union[float, torch.Tensor] = 1.,
-            is_inhibitory: bool = False,
+            is_inhibitory: Union[torch.Tensor, None] = None,
             learning: bool = True,
             u_rest: Union[float, torch.Tensor] = 0,
             tau_t: Union[float, torch.Tensor] = 5,
@@ -487,7 +490,7 @@ class AELIFPopulation(ELIFPopulation):
             additive_spike_trace: bool = True,
             tau_s: Union[float, torch.Tensor] = 10.,
             trace_scale: Union[float, torch.Tensor] = 1.,
-            is_inhibitory: bool = False,
+            is_inhibitory: Union[torch.Tensor, None] = None,
             learning: bool = True,
             u_rest: Union[float, torch.Tensor] = 0,
             tau_t: Union[float, torch.Tensor] = 5,
@@ -521,7 +524,7 @@ class AELIFPopulation(ELIFPopulation):
 
         self.register_buffer(self.RB_ADAPTION, torch.tensor(0)) # Single adaption variabel
 
-    def forward(self, current: torch.Tensor) -> None:
+    def forward(self, current: torch.Tensor, **kwargs) -> None:
         super().forward(current)
         self.w = self.compute_adaption()
 
