@@ -4,6 +4,8 @@ Module for encoding data into spike.
 
 from abc import ABC, abstractmethod
 from typing import Optional
+from itertools import repeat
+from functools import reduce
 
 import torch
 
@@ -25,7 +27,7 @@ class AbstractEncoder(ABC):
 
     Arguments
     ---------
-    time : int
+    time : float
         Length of encoded tensor.
     dt : float, Optional
         Simulation time step. The default is 1.0.
@@ -36,7 +38,7 @@ class AbstractEncoder(ABC):
 
     def __init__(
         self,
-        time: int,
+        time: float,
         dt: Optional[float] = 1.0,
         device: Optional[str] = "cpu",
         **kwargs
@@ -46,7 +48,7 @@ class AbstractEncoder(ABC):
         self.device = device
 
     @abstractmethod
-    def __call__(self, data: torch.Tensor) -> None:
+    def __call__(self, data: torch.Tensor) -> torch.Tensor:
         """
         Compute the encoded tensor of the given data.
 
@@ -73,9 +75,11 @@ class Time2FirstSpikeEncoder(AbstractEncoder):
 
     def __init__(
         self,
-        time: int,
+        time: float,
         dt: Optional[float] = 1.0,
         device: Optional[str] = "cpu",
+        d_min: int = 0,
+        d_max: int = 255,
         **kwargs
     ) -> None:
         super().__init__(
@@ -84,19 +88,19 @@ class Time2FirstSpikeEncoder(AbstractEncoder):
             device=device,
             **kwargs
         )
-        """
-        TODO.
+        self.d_min = torch.tensor(d_min, device=self.device)
+        self.d_max = torch.tensor(d_max, device=self.device)
 
-        Add other attributes if needed and fill the body accordingly.
-        """
-
-    def __call__(self, data: torch.Tensor) -> None:
-        """
-        TODO.
-
-        Implement the computation for coding the data. Return resulting tensor.
-        """
-        pass
+    def __call__(self, data: torch.Tensor) -> torch.Tensor:
+        data = data.clone().detach().to(self.device)
+        data = self.d_max + self.d_min - data
+        steps = torch.tensor(int(self.time / self.dt), device=self.device)
+        scaled_data = (data - self.d_min) * steps / (self.d_max - self.d_min + 1)
+        expand_scaled_data = scaled_data.expand(steps, *data.shape)
+        steps_list = torch.arange(0, self.time, self.dt, device=self.device)
+        reshaped_steps_list = steps_list.reshape(len(steps_list), *tuple(repeat(1, data.dim())))
+        return ((expand_scaled_data - reshaped_steps_list).abs() < (self.dt / 2)) + \
+               ((expand_scaled_data - reshaped_steps_list) == (self.dt / 2))
 
 
 class PositionEncoder(AbstractEncoder):
@@ -104,13 +108,26 @@ class PositionEncoder(AbstractEncoder):
     Position coding.
 
     Implement Position coding.
+
+
+    Arguments
+    ---------
+    peaks : float
+        Tensor that includes peak points of encoder. (means of gaussians)
+        Result is depends on the order of peaks.
+
+    std : float, Optional
+        Standard deviation of gaussians. The default is 1.0.
+
     """
 
     def __init__(
         self,
-        time: int,
+        time: float,
+        peaks: torch.Tensor,
         dt: Optional[float] = 1.0,
         device: Optional[str] = "cpu",
+        std: Optional[float] = 1.0,
         **kwargs
     ) -> None:
         super().__init__(
@@ -119,19 +136,23 @@ class PositionEncoder(AbstractEncoder):
             device=device,
             **kwargs
         )
-        """
-        TODO.
+        self.std = torch.tensor(std, device=self.device)
+        self.steps = torch.tensor(int(self.time / self.dt), device=self.device)
+        self.peaks = torch.flatten(peaks)
 
-        Add other attributes if needed and fill the body accordingly.
-        """
+    def __call__(self, data: torch.Tensor) -> torch.Tensor:
+        data = torch.flatten(data)
+        result = torch.full((self.steps, self.peaks.size()[0]), False, device=self.device)
+        for ndx, peak in enumerate(self.peaks):
+            g = self.rev_gaussian(data, peak)
+            g = g[g < self.steps * 0.9]
+            g = torch.round(g)
+            result[g.long(), ndx] = True
+        return result
 
-    def __call__(self, data: torch.Tensor) -> None:
-        """
-        TODO.
-
-        Implement the computation for coding the data. Return resulting tensor.
-        """
-        pass
+    def rev_gaussian(self, x: torch.Tensor, mu: torch.Tensor):
+        power = (- (x - mu) * (x - mu)) / (2 * self.std * self.std)
+        return - (self.steps * torch.exp(power)) + self.steps
 
 
 class PoissonEncoder(AbstractEncoder):
@@ -143,9 +164,12 @@ class PoissonEncoder(AbstractEncoder):
 
     def __init__(
         self,
-        time: int,
+        time: float,
         dt: Optional[float] = 1.0,
         device: Optional[str] = "cpu",
+        r: float = 10,
+        d_min: int = 0,
+        d_max: int = 255,
         **kwargs
     ) -> None:
         super().__init__(
@@ -154,16 +178,14 @@ class PoissonEncoder(AbstractEncoder):
             device=device,
             **kwargs
         )
-        """
-        TODO.
+        self.d_min = torch.tensor(d_min, device=self.device)
+        self.d_max = torch.tensor(d_max, device=self.device)
+        self.r = torch.tensor(r, device=self.device)
 
-        Add other attributes if needed and fill the body accordingly.
-        """
+    def __call__(self, data: torch.Tensor) -> torch.Tensor:
+        steps = torch.tensor(int(self.time / self.dt), device=self.device)
+        data = data.clone().detach().to(self.device)
+        r_x = (data - self.d_min) * self.r / self.d_max
+        p = r_x * self.dt / self.time
+        return torch.rand((steps, *data.shape), device=self.device) < p
 
-    def __call__(self, data: torch.Tensor) -> None:
-        """
-        TODO.
-
-        Implement the computation for coding the data. Return resulting tensor.
-        """
-        pass
