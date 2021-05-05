@@ -8,7 +8,7 @@ sys.path.append('../')
 
 import torch
 
-from cnsproject.network.neural_populations import LIFPopulation
+from cnsproject.network.neural_populations import LIFPopulation, PopulationVariables
 from cnsproject.plotting.plotting import Plot
 from cnsproject.utils.general import get_random_current, population_type
 from cnsproject.utils.monitor import DummyMonitor
@@ -42,10 +42,10 @@ BINS = 500
 TIME = 5000
 PROB = .4
 monitor_variables = [
-    LIFPopulation.RB_POTENTIAL,
-    LIFPopulation.RB_TIME,
-    LIFPopulation.RB_SPIKES,
-    LIFPopulation.RB_CURRENT
+    PopulationVariables.RB_POTENTIAL,
+    PopulationVariables.RB_TIME,
+    PopulationVariables.RB_SPIKES,
+    PopulationVariables.RB_CURRENT
 ]
 
 current_1 = get_random_current(TIME, start=5, coef=.3)
@@ -90,9 +90,10 @@ for connection_ratio in [.4, .8]:
         c_1_3 = RandomConnection(exc_1, inh, j0=j0, s0=s0, probability=connection_ratio)
         c_2_3 = c_1_3.copy(exc_2, inh)
 
-        monitor_1 = Monitor(exc_1, monitor_variables)
-        monitor_2 = Monitor(exc_2, monitor_variables)
-        monitor_3 = Monitor(inh, monitor_variables)
+        device = "cpu"
+        monitor_1 = Monitor(exc_1, monitor_variables, device=device)
+        monitor_2 = Monitor(exc_2, monitor_variables, device=device)
+        monitor_3 = Monitor(inh, monitor_variables, device=device)
 
         net = Network(learning=False)
         net.add_layer(exc_1, "exc_1")
@@ -107,6 +108,7 @@ for connection_ratio in [.4, .8]:
         net.add_monitor(monitor_1, "exc_1")
         net.add_monitor(monitor_2, "exc_2")
         net.add_monitor(monitor_3, "inh")
+        # net = net.cuda()
 
         net.run(TIME, random_factor=0, currents={
             "exc_1": current_1,
@@ -150,4 +152,4 @@ for connection_ratio in [.4, .8]:
 
         p_set = p_set + 1
 
-Plot.show()
+# Plot.show()

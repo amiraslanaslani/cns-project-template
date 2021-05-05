@@ -8,7 +8,7 @@ from operator import mul
 import torch
 
 from ..network.monitors import Monitor, AbstractMonitor
-from ..network.neural_populations import NeuralPopulation, LIFPopulation
+from ..network.neural_populations import NeuralPopulation, LIFPopulation, PopulationVariables
 from ..network.connections import AbstractConnection
 
 
@@ -174,7 +174,7 @@ class FIPlotter(AbstractPlotter):
 
         monitor = Monitor(
             neuron,
-            state_variables=[NeuralPopulation.RB_SPIKES]
+            state_variables=[PopulationVariables.RB_SPIKES]
         )
         monitor.set_time_steps(time, time_step)
         monitor.reset_state_variables()
@@ -184,7 +184,7 @@ class FIPlotter(AbstractPlotter):
             neuron.forward(current_value)
             monitor.record()
 
-        spikes_tensor = monitor.get(NeuralPopulation.RB_SPIKES)
+        spikes_tensor = monitor.get(PopulationVariables.RB_SPIKES)
         spikes_number = spikes_tensor.sum()
         return spikes_number
 
@@ -222,8 +222,8 @@ class RasterPlotter(AbstractPlotter):
             legend: bool = False,
             **kwargs
     ) -> Axes:
-        spikes = monitor.get(NeuralPopulation.RB_SPIKES)
-        time = monitor.get(LIFPopulation.RB_TIME)
+        spikes = monitor.get(PopulationVariables.RB_SPIKES)
+        time = monitor.get(PopulationVariables.RB_TIME)
 
         if inhibitories is None:
             inhibitories = torch.full((spikes.shape[1],), False)
@@ -256,9 +256,9 @@ class ActivityPlotter(AbstractPlotter):
     ) -> Axes:
         ax.set_title("Activity")
         ax.set_xlabel("time")
-        spikes = monitor.get(NeuralPopulation.RB_SPIKES)
+        spikes = monitor.get(PopulationVariables.RB_SPIKES)
         activity = spikes.int().sum(dim=1) / spikes.shape[1]
-        time = monitor.get(LIFPopulation.RB_TIME)
+        time = monitor.get(PopulationVariables.RB_TIME)
         n = reduce(mul, time.shape)
         ax.set_xlim(time.min(), time.max())
         ax.set_ylim(-0.1, 1)

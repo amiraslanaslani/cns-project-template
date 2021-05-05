@@ -7,7 +7,7 @@ from typing import Union, Sequence
 
 import torch
 
-from .neural_populations import NeuralPopulation
+from .neural_populations import NeuralPopulation, PopulationVariables
 
 
 class AbstractConnection(ABC, torch.nn.Module):
@@ -139,15 +139,14 @@ class AbstractConnection(ABC, torch.nn.Module):
         None
 
         """
-        spikes = getattr(self.pre, NeuralPopulation.RB_SPIKES)
-        spikes_effect = self.w.clone().detach()
-        spikes_effect[~ spikes, :] = 0
+        spikes = getattr(self.pre, PopulationVariables.RB_SPIKES)
+        spikes_effect = (self.w.t().mul(spikes)).t()
         spikes_effect = spikes_effect.sum(dim=0)
 
         setattr(
             self.post,
-            NeuralPopulation.RB_POTENTIAL,
-            getattr(self.post, NeuralPopulation.RB_POTENTIAL) + spikes_effect
+            PopulationVariables.RB_POTENTIAL,
+            getattr(self.post, PopulationVariables.RB_POTENTIAL) + spikes_effect
         )
 
     def update(self, **kwargs) -> None:

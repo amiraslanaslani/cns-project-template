@@ -5,6 +5,7 @@ Module for spiking neural network construction and simulation.
 from typing import Optional, Dict
 
 import torch
+from tqdm import trange
 
 from .neural_populations import NeuralPopulation
 from .connections import AbstractConnection
@@ -194,6 +195,8 @@ class Network(torch.nn.Module):
         one_step : bool, optional
             Whether to propagate the inputs all the way through the network in\
             a single simulation step. The default is False.
+        random_factor : float, optional
+            Randomness degree
 
         Keyword Arguments
         -----------------
@@ -230,9 +233,8 @@ class Network(torch.nn.Module):
             self.connections[connection].dt = dt
 
         time_steps = int(time / dt)
-        for time_step in range(time_steps):
-            if time_step % 1000 == 0:
-                print(f"STEP {time_step}")
+        p_bar = trange(time_steps, unit="timesteps")
+        for time_step in p_bar:
             for layer in self.layers:
                 if layer in currents:
                     current = currents[layer][time_step]

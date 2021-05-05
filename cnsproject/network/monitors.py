@@ -2,7 +2,7 @@
 Module for monitoring objects.
 """
 
-from typing import Union, Iterable, Optional
+from typing import Union, Iterable, Optional, Dict
 from abc import ABC, abstractmethod
 
 import torch
@@ -80,11 +80,11 @@ class Monitor(AbstractMonitor):
         time: float = None,
         dt: float = None
     ) -> None:
-        self.obj = obj
-        self.state_variables = state_variables
-        self.time_steps = 0
-        self.device = device
-        self.recording = []
+        self.obj: Union[NeuralPopulation, AbstractConnection] = obj
+        self.state_variables: Iterable[str] = state_variables
+        self.time_steps: int = 0
+        self.device: str = device
+        self.recording: Dict[str, torch.Tensor] = {}
 
         if not (time is None or dt is None):
             self.set_time_steps(time, dt)

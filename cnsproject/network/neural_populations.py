@@ -12,6 +12,16 @@ import torch
 from cnsproject.utils.general import population_type
 
 
+class PopulationVariables:
+    RB_SPIKES = "s"
+    RB_POTENTIAL = "u"
+    RB_TIME = "time"
+
+    RB_CURRENT = "current"
+
+    RB_ADAPTION = "w"
+
+
 class NeuralPopulation(torch.nn.Module):
     """
     Base class for implementing neural populations.
@@ -79,9 +89,6 @@ class NeuralPopulation(torch.nn.Module):
 
     """
 
-    RB_SPIKES = "s"
-    RB_POTENTIAL = "u"
-
     def __init__(
         self,
         shape: Iterable[int],
@@ -123,9 +130,10 @@ class NeuralPopulation(torch.nn.Module):
 
         # You can use `torch.Tensor()` instead of `torch.zeros(*shape, dtype=torch.bool)` if \
         # `reset_state_variables` is intended to be called before every simulation.
-        self.register_buffer(self.RB_SPIKES, torch.zeros(*self.shape, dtype=torch.bool))
-        self.register_buffer(self.RB_POTENTIAL, torch.full((*self.shape,), 0))
-        self.dt = None
+        self.register_buffer(PopulationVariables.RB_SPIKES, torch.zeros(*self.shape, dtype=torch.bool))
+        self.register_buffer(PopulationVariables.RB_POTENTIAL, torch.full((*self.shape,), 0))
+        self.register_buffer(PopulationVariables.RB_TIME, torch.tensor(0))
+        self.dt: torch.Tensor = torch.tensor(1.)
 
     def set_timestep(self, dt: Union[float, torch.Tensor]) -> None:
         """
@@ -165,6 +173,8 @@ class NeuralPopulation(torch.nn.Module):
                 self.traces += self.trace_scale * self.s.float()
             else:
                 self.traces.masked_fill_(self.s, 1)
+
+        self.time = self.time + self.dt
 
     def compute_potential(self) -> None:
         """
@@ -223,6 +233,8 @@ class NeuralPopulation(torch.nn.Module):
 
         """
         self.s.zero_()
+        self.time = torch.tensor(0)
+        self.u = self.u_rest
 
         if self.spike_trace:
             self.traces.zero_()
@@ -272,6 +284,7 @@ class InputPopulation(NeuralPopulation):
     def __init__(
         self,
         shape: Iterable[int],
+        spike_train: torch.Tensor,
         spike_trace: bool = True,
         additive_spike_trace: bool = True,
         tau_s: Union[float, torch.Tensor] = 10.,
@@ -287,8 +300,11 @@ class InputPopulation(NeuralPopulation):
             trace_scale=trace_scale,
             learning=learning,
         )
+        assert spike_train.shape[1:] == shape
+        self.spike_train = spike_train
+        self._forward_counter = 0
 
-    def forward(self, traces: torch.Tensor) -> None:
+    def forward(self, traces: torch.Tensor, **kwargs) -> None:
         """
         Simulate the neural population for a single step.
 
@@ -302,8 +318,12 @@ class InputPopulation(NeuralPopulation):
         None
 
         """
-        self.s = traces
+        if self.spike_train.shape[0] > self._forward_counter:
+            self.s = self.spike_train[self._forward_counter]
+        else:
+            self.s = torch.full(self.spike_train.shape[1:], False)
 
+        self._forward_counter = self._forward_counter + 1
         super().forward(traces)
 
     def reset_state_variables(self) -> None:
@@ -326,8 +346,7 @@ class LIFPopulation(NeuralPopulation):
     Follow the template structure of NeuralPopulation class for consistency.
     """
 
-    RB_CURRENT = "current"
-    RB_TIME = "time"
+
 
     def __init__(
         self,
@@ -355,15 +374,13 @@ class LIFPopulation(NeuralPopulation):
         )
 
         # Set model parameters
-        self.u_rest = torch.tensor(u_rest)
-        self.tau_t = torch.tensor(tau_t)
-        self.resistance = torch.tensor(resistance)
-        self.threshold = torch.tensor(threshold)
+        self.u_rest = torch.nn.Parameter(torch.tensor(u_rest), requires_grad=False)
+        self.tau_t = torch.nn.Parameter(torch.tensor(tau_t), requires_grad=False)
+        self.resistance = torch.nn.Parameter(torch.tensor(resistance), requires_grad=False)
+        self.threshold = torch.nn.Parameter(torch.tensor(threshold), requires_grad=False)
 
-        self.register_buffer(self.RB_TIME, torch.tensor(0))
-        self.register_buffer(self.RB_CURRENT, torch.zeros(*self.shape))
-
-        setattr(self, self.RB_POTENTIAL, torch.full((*self.shape,), self.u_rest))
+        self.register_buffer(PopulationVariables.RB_CURRENT, torch.zeros(*self.shape))
+        setattr(self, PopulationVariables.RB_POTENTIAL, torch.full((*self.shape,), u_rest))
 
     def forward(self, current: torch.Tensor, random: float = 0) -> None:
         """
@@ -382,7 +399,6 @@ class LIFPopulation(NeuralPopulation):
         None
 
         """
-        super().forward(current)
         self.current = current
         if random > 0:
             self.current = torch.tensor(random) * torch.rand(self.n) + self.current
@@ -390,7 +406,7 @@ class LIFPopulation(NeuralPopulation):
 
         self.u = self.compute_potential()
         self.compute_spike()
-        self.time = self.time + self.dt
+        super().forward(current)
 
     def compute_potential(self) -> torch.Tensor:
         """
@@ -408,17 +424,16 @@ class LIFPopulation(NeuralPopulation):
         return (self.compute_decay() + c_part) / self.tau_t
 
     def compute_decay(self) -> torch.Tensor:
-        return -(self.u - self.u_rest)
+        return -self.u + self.u_rest
 
     def compute_spike(self) -> None:
-        indexes = self.u >= self.threshold
-        self.s = indexes
-        self.u[indexes] = self.u_rest.float()
+        self.s = self.u >= self.threshold
+        # self.s = self.u.ge(self.threshold)
+        # self.u[indexes] = self.u_rest.float()
+        self.u = torch.where(self.s, self.u_rest.float(), self.u)
 
     def reset_state_variables(self) -> None:
         super().reset_state_variables()
-        self.u = self.u_rest
-        self.time = torch.tensor(0)
         self.current = torch.tensor(0)
 
 
@@ -481,7 +496,7 @@ class AELIFPopulation(ELIFPopulation):
     Note: You can use ELIFPopulation as parent class as well.
     """
 
-    RB_ADAPTION = "w"
+
 
     def __init__(
             self,
@@ -522,7 +537,7 @@ class AELIFPopulation(ELIFPopulation):
         self.b = torch.tensor(b)
         self.a = torch.tensor(a)
 
-        self.register_buffer(self.RB_ADAPTION, torch.tensor(0)) # Single adaption variabel
+        self.register_buffer(PopulationVariables.RB_ADAPTION, torch.tensor(0)) # Single adaption variabel
 
     def forward(self, current: torch.Tensor, **kwargs) -> None:
         super().forward(current)
