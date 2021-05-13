@@ -55,9 +55,9 @@ class AbstractConnection(ABC, torch.nn.Module):
     learning_rule : LearningRule
         Define the learning rule by which the network will be trained. The\
         default is NoOp (see learning/learning_rules.py for more details).
-    wmin : float
+    w_min : float
         The minimum possible synaptic strength. The default is 0.0.
-    wmax : float
+    w_max : float
         The maximum possible synaptic strength. The default is 1.0.
     norm : float
         Define a normalization on input signals to a population. If `None`,\
@@ -91,20 +91,7 @@ class AbstractConnection(ABC, torch.nn.Module):
         N = post.shape[0]
 
         self.weight_decay = weight_decay
-
-        from ..learning.learning_rules import NoOp
-
-        learning_rule = kwargs.get('learning_rule', NoOp)
-
-        self.learning_rule = learning_rule(
-            connection=self,
-            lr=lr,
-            weight_decay=weight_decay,
-            **kwargs
-        )
-        self.wmin = kwargs.get('wmin', 0.)
-        self.wmax = kwargs.get('wmax', 1.)
-        self.norm = kwargs.get('norm', None)
+        self.dt: torch.Tensor = torch.tensor(1.)
 
         w = kwargs.get(
             'weight',
@@ -117,8 +104,42 @@ class AbstractConnection(ABC, torch.nn.Module):
         w[~ pre.is_inhibitory, :] *= -1
         self.register_buffer('w', w)
 
-        self.mask = self.compute_mask(self.w.shape, **kwargs)
+        from ..learning.learning_rules import NoOp
+        learning_rule = kwargs.get('learning_rule', NoOp)
+        self.learning_rule = learning_rule(
+            connection=self,
+            lr=lr,
+            weight_decay=weight_decay,
+            dt=self.dt,
+            device=kwargs.get('learning_rule_device', "cpu"),
+            **kwargs
+        )
+        self.w_min = kwargs.get('w_min', 0.)
+        self.w_max = kwargs.get('w_max', 50.)
+        self.norm = kwargs.get('norm', None)
+
+        self.mask = torch.nn.Parameter(
+            self.compute_mask(self.w.shape, **kwargs),
+            requires_grad=False
+        )
         self.w[~ self.mask] = 0
+
+    def set_time_step(self, dt: Union[float, torch.Tensor]) -> None:
+        """
+        Time step length setter.
+
+        Parameters
+        ----------
+        dt : Union[float, torch.Tensor]
+            Time step length.
+
+        Returns
+        -------
+        None
+
+        """
+        self.dt = torch.tensor(dt)
+        self.learning_rule.set_time_step(dt)
 
     @abstractmethod
     def compute_mask(self, shape: torch.Tensor, **kwargs) -> torch.Tensor:
@@ -128,11 +149,6 @@ class AbstractConnection(ABC, torch.nn.Module):
         """
         Compute the post-synaptic neural population activity based on the given\
         spikes of the pre-synaptic population.
-
-        Parameters
-        ----------
-        s : torch.Tensor
-            The pre-synaptic spikes tensor.
 
         Returns
         -------
@@ -156,23 +172,24 @@ class AbstractConnection(ABC, torch.nn.Module):
         Keyword Arguments
         -----------------
         learning : bool
-            Whether learning is enabled or not. The default is True.
+            Whether learning is enabled or not. The default is `self.training`.
         mask : torch.ByteTensor
-            Define a mask to determine which weights to clamp to zero.
+            Define a mask to determine which weights to clamp to zero. Note: Elements that
+            equals to False get zero. The default is `self.mask`.
 
         Returns
         -------
         None
 
         """
-        learning = kwargs.get("learning", True)
-
+        learning = kwargs.get("learning", self.training)
         if learning:
             self.learning_rule.update(**kwargs)
 
-        mask = kwargs.get("mask", None)
-        if mask is not None:
-            self.w.masked_fill_(mask, 0)
+            # We apply mask only when learning applied. Because weights changed only when learning rule changes it.
+            mask = kwargs.get("mask", ~ self.mask)
+            if mask is not None:
+                self.w.masked_fill_(mask, 0)
 
     @abstractmethod
     def reset_state_variables(self) -> None:
@@ -243,7 +260,6 @@ class RandomConnection(AbstractConnection):
         weight_decay: float = 0.0,
         j0: float = 10,
         s0: float = 30,
-        probability: Union[float, torch.Tensor] = 0.5,
         **kwargs
     ) -> None:
         super().__init__(
@@ -253,11 +269,10 @@ class RandomConnection(AbstractConnection):
             weight_decay=weight_decay,
             j0=j0,
             s0=s0,
-            prob=probability,
             **kwargs
         )
 
-    def compute_mask(self, shape: torch.Tensor, prob: torch.Tensor, **kwargs) -> torch.Tensor:
+    def compute_mask(self, shape: torch.Tensor, prob: torch.Tensor = 0.5, **kwargs) -> torch.Tensor:
         size = shape[0] * shape[1]
         select = int(size * prob)
         indexes = torch.randperm(size)[:select]
@@ -274,8 +289,8 @@ class RandomConnection(AbstractConnection):
             weight_decay=self.weight_decay
         )
         result.w = self.w
-        result.wmax = self.wmax
-        result.wmin = self.wmin
+        result.w_max = self.w_max
+        result.w_min = self.w_min
         result.norm = self.norm
         result.mask = self.mask
         return result

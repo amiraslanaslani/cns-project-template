@@ -16,6 +16,7 @@ class PopulationVariables:
     RB_SPIKES = "s"
     RB_POTENTIAL = "u"
     RB_TIME = "time"
+    RB_SPIKE_TRACE = "traces"
 
     RB_CURRENT = "current"
 
@@ -110,7 +111,7 @@ class NeuralPopulation(torch.nn.Module):
         if self.spike_trace:
             # You can use `torch.Tensor()` instead of `torch.zeros(*shape)` if `reset_state_variables`
             # is intended to be called before every simulation.
-            self.register_buffer("traces", torch.zeros(*self.shape))
+            self.register_buffer(PopulationVariables.RB_SPIKE_TRACE, torch.zeros(*self.shape))
             self.register_buffer("tau_s", torch.tensor(tau_s))
 
             if self.additive_spike_trace:
@@ -126,7 +127,8 @@ class NeuralPopulation(torch.nn.Module):
         else:
             self.is_inhibitory = is_inhibitory
 
-        self.learning = learning
+        # self.learning = learning
+        self.train(learning)
 
         # You can use `torch.Tensor()` instead of `torch.zeros(*shape, dtype=torch.bool)` if \
         # `reset_state_variables` is intended to be called before every simulation.
@@ -135,7 +137,10 @@ class NeuralPopulation(torch.nn.Module):
         self.register_buffer(PopulationVariables.RB_TIME, torch.tensor(0))
         self.dt: torch.Tensor = torch.tensor(1.)
 
-    def set_timestep(self, dt: Union[float, torch.Tensor]) -> None:
+    def get(self, key: str):
+        return getattr(self, key)
+
+    def set_time_step(self, dt: Union[float, torch.Tensor]) -> None:
         """
         Time step length setter.
 
@@ -152,14 +157,14 @@ class NeuralPopulation(torch.nn.Module):
         self.dt = torch.tensor(dt)
 
     @abstractmethod
-    def forward(self, traces: torch.Tensor) -> None:
+    def forward(self, **kwargs) -> None:
         """
         Simulate the neural population for a single step.
 
         Parameters
         ----------
-        traces : torch.Tensor
-            Input spike trace.
+        current : torch.Tensor
+           Input electric current.
 
         Returns
         -------
@@ -167,7 +172,7 @@ class NeuralPopulation(torch.nn.Module):
 
         """
         if self.spike_trace:
-            self.traces *= self.trace_decay
+            self.traces *= torch.exp(-self.dt/self.tau_s)
 
             if self.additive_spike_trace:
                 self.traces += self.trace_scale * self.s.float()
@@ -209,20 +214,6 @@ class NeuralPopulation(torch.nn.Module):
         """
         pass
 
-    def compute_decay(self) -> None:
-        """
-        Set the decays.
-
-        Returns
-        -------
-        None
-
-        """
-        self.dt = torch.tensor(self.dt)
-
-        if self.spike_trace:
-            self.trace_decay = torch.exp(-self.dt/self.tau_s)
-
     def reset_state_variables(self) -> None:
         """
         Reset all internal state variables.
@@ -239,23 +230,24 @@ class NeuralPopulation(torch.nn.Module):
         if self.spike_trace:
             self.traces.zero_()
 
-    def train(self, mode: bool = True) -> "NeuralPopulation":
-        """
-        Set the population's training mode.
-
-        Parameters
-        ----------
-        mode : bool, optional
-            Mode of training. `True` turns on the training while `False` turns\
-            it off. The default is True.
-
-        Returns
-        -------
-        NeuralPopulation
-
-        """
-        self.learning = mode
-        return super().train(mode)
+    # def train(self, mode: bool = True) -> "NeuralPopulation":
+    #     """
+    #     Set the population's training mode.
+    #
+    #     Parameters
+    #     ----------
+    #     mode : bool, optional
+    #         Mode of training. `True` turns on the training while `False` turns\
+    #         it off. The default is True.
+    #
+    #     Returns
+    #     -------
+    #     NeuralPopulation
+    #
+    #     """
+    #     # self.learning = mode
+    #     super().train(mode)
+    #     return self
 
 
 class InputPopulation(NeuralPopulation):
@@ -301,17 +293,18 @@ class InputPopulation(NeuralPopulation):
             learning=learning,
         )
         assert spike_train.shape[1:] == shape
-        self.spike_train = spike_train
+        self.register_buffer("spike_train", spike_train)
+        # self.spike_train = spike_train
         self._forward_counter = 0
 
-    def forward(self, traces: torch.Tensor, **kwargs) -> None:
+    def change_spike_train(self, spike_train: torch.Tensor, reset_counter: bool = True):
+        self.spike_train = spike_train
+        if reset_counter:
+            self._forward_counter = 0
+
+    def forward(self, **kwargs) -> None:
         """
         Simulate the neural population for a single step.
-
-        Parameters
-        ----------
-        traces : torch.Tensor
-            Input spike trace.
 
         Returns
         -------
@@ -324,7 +317,7 @@ class InputPopulation(NeuralPopulation):
             self.s = torch.full(self.spike_train.shape[1:], False)
 
         self._forward_counter = self._forward_counter + 1
-        super().forward(traces)
+        super().forward()
 
     def reset_state_variables(self) -> None:
         """
@@ -345,9 +338,6 @@ class LIFPopulation(NeuralPopulation):
     Implement LIF neural dynamics(Parameters of the model must be modifiable).\
     Follow the template structure of NeuralPopulation class for consistency.
     """
-
-
-
     def __init__(
         self,
         shape: Iterable[int],
@@ -357,7 +347,7 @@ class LIFPopulation(NeuralPopulation):
         trace_scale: Union[float, torch.Tensor] = 1.,
         is_inhibitory: Union[torch.Tensor, None] = None,
         learning: bool = True,
-        u_rest: Union[float, torch.Tensor] = -70, #
+        u_rest: Union[float, torch.Tensor] = -70,
         tau_t: Union[float, torch.Tensor] = 5,
         resistance: Union[float, torch.Tensor] = 1,
         threshold: Union[float, torch.Tensor] = 30,
@@ -406,7 +396,7 @@ class LIFPopulation(NeuralPopulation):
 
         self.u = self.compute_potential()
         self.compute_spike()
-        super().forward(current)
+        super().forward()
 
     def compute_potential(self) -> torch.Tensor:
         """

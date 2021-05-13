@@ -3,15 +3,16 @@ Module for learning rules.
 """
 
 from abc import ABC
-from typing import Union, Optional, Sequence
+from typing import Union, Optional, Sequence, Callable
 
 import numpy as np
 import torch
 
 from ..network.connections import AbstractConnection
+from ..network.neural_populations import PopulationVariables
 
 
-class LearningRule(ABC):
+class AbstractLearningRule(ABC):
     """
     Abstract class for defining learning rules.
 
@@ -43,16 +44,36 @@ class LearningRule(ABC):
         connection: AbstractConnection,
         lr: Optional[Union[float, Sequence[float]]] = None,
         weight_decay: float = 0.,
+        dt: Union[torch.Tensor, float] = 1.,
+        device: str = "cpu",
         **kwargs
     ) -> None:
-        if lr is None:
-            lr = [0., 0.]
-        elif isinstance(lr, float) or isinstance(lr, int):
-            lr = [lr, lr]
-
-        self.lr = torch.tensor(lr, dtype=torch.float)
-
+        # if lr is None:
+        #     lr = [0., 0.]
+        # elif isinstance(lr, float) or isinstance(lr, int):
+        #     lr = [lr, lr]
+        #
+        # self.lr = torch.tensor(lr, dtype=torch.float)
+        self.device = device
         self.weight_decay = 1 - weight_decay if weight_decay else 1.
+        self.connection = connection
+        self.dt = dt if isinstance(dt, torch.Tensor) else torch.tensor(dt, device=self.device)
+
+    def set_time_step(self, dt: Union[float, torch.Tensor]) -> None:
+        """
+        Time step length setter.
+
+        Parameters
+        ----------
+        dt : Union[float, torch.Tensor]
+            Time step length.
+
+        Returns
+        -------
+        None
+
+        """
+        self.dt = torch.tensor(dt, device=self.device)
 
     def update(self) -> None:
         """
@@ -67,13 +88,13 @@ class LearningRule(ABC):
             self.connection.w *= self.weight_decay
 
         if (
-            self.connection.wmin != -np.inf or self.connection.wmax != np.inf
+                self.connection.w_min != -np.inf or self.connection.w_max != np.inf
         ) and not isinstance(self.connection, NoOp):
-            self.connection.w.clamp_(self.connection.wmin,
-                                     self.connection.wmax)
+            self.connection.w.clamp_(self.connection.w_min,
+                                     self.connection.w_max)
 
 
-class NoOp(LearningRule):
+class NoOp(AbstractLearningRule):
     """
     Learning rule with no effect.
 
@@ -117,7 +138,7 @@ class NoOp(LearningRule):
         super().update()
 
 
-class STDP(LearningRule):
+class STDP(AbstractLearningRule):
     """
     Spike-Time Dependent Plasticity learning rule.
 
@@ -130,6 +151,8 @@ class STDP(LearningRule):
         connection: AbstractConnection,
         lr: Optional[Union[float, Sequence[float]]] = None,
         weight_decay: float = 0.,
+        a_plus: Union[float, Callable] = 1.,
+        a_minus: Union[float, Callable] = 1.,
         **kwargs
     ) -> None:
         super().__init__(
@@ -138,12 +161,37 @@ class STDP(LearningRule):
             weight_decay=weight_decay,
             **kwargs
         )
-        """
-        TODO.
+        if not callable(a_plus):
+            self.constant_a_plus = torch.full_like(self.connection.w, a_plus, device=self.device)
+            a_plus = lambda w: self.constant_a_plus
+        self.a_plus = a_plus
 
-        Consider the additional required parameters and fill the body\
-        accordingly.
-        """
+        if not callable(a_minus):
+            self.constant_a_minus = torch.full_like(self.connection.w, a_minus, device=self.device)
+            a_minus = lambda w: self.constant_a_minus
+        self.a_minus = a_minus
+
+    def get_spike_trace(self, pre=True):
+        return (self.connection.pre if pre else self.connection.post)\
+            .get(PopulationVariables.RB_SPIKE_TRACE)
+
+    def __weight_changes(self) -> torch.Tensor:
+        post = self.connection.post
+        pre = self.connection.pre
+
+        negative_part = (
+             self.a_minus(self.connection.w) *
+             self.get_spike_trace(pre=False).expand((*pre.shape, *post.shape)) *
+             pre.get(PopulationVariables.RB_SPIKES).expand((*post.shape, *pre.shape)).T
+         )
+
+        positive_part = (
+             self.a_plus(self.connection.w) *
+             self.get_spike_trace(pre=True).expand((*post.shape, *pre.shape)).T *
+             post.get(PopulationVariables.RB_SPIKES).expand((*pre.shape, *post.shape))
+        )
+
+        return positive_part - negative_part
 
     def update(self, **kwargs) -> None:
         """
@@ -152,48 +200,22 @@ class STDP(LearningRule):
         Implement the dynamics and updating rule. You might need to call the\
         parent method.
         """
-        pass
+        self.connection.w += self.dt * (self.__weight_changes())
+        super().update()
 
 
-class FlatSTDP(LearningRule):
+class FlatSTDP(STDP):
     """
     Flattened Spike-Time Dependent Plasticity learning rule.
 
-    Implement the dynamics of Flat-STDP learning rule.You might need to implement\
+    Implement the dynamics of Flat-STDP learning rule. You might need to implement\
     different update rules based on type of connection.
     """
-
-    def __init__(
-        self,
-        connection: AbstractConnection,
-        lr: Optional[Union[float, Sequence[float]]] = None,
-        weight_decay: float = 0.,
-        **kwargs
-    ) -> None:
-        super().__init__(
-            connection=connection,
-            lr=lr,
-            weight_decay=weight_decay,
-            **kwargs
-        )
-        """
-        TODO.
-
-        Consider the additional required parameters and fill the body\
-        accordingly.
-        """
-
-    def update(self, **kwargs) -> None:
-        """
-        TODO.
-
-        Implement the dynamics and updating rule. You might need to call the\
-        parent method.
-        """
-        pass
+    def get_spike_trace(self, pre=True):
+        return torch.tensor(1., device=self.device)
 
 
-class RSTDP(LearningRule):
+class RSTDP(AbstractLearningRule):
     """
     Reward-modulated Spike-Time Dependent Plasticity learning rule.
 
@@ -232,7 +254,7 @@ class RSTDP(LearningRule):
         pass
 
 
-class FlatRSTDP(LearningRule):
+class FlatRSTDP(AbstractLearningRule):
     """
     Flattened Reward-modulated Spike-Time Dependent Plasticity learning rule.
 

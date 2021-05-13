@@ -166,11 +166,10 @@ class FIPlotter(AbstractPlotter):
             current: Union[float, int],
             time_step: Union[int, float, None],
             time: Union[int, float],
-
     ):
         neuron.reset_state_variables()
         if not (time_step is None):
-            neuron.set_timestep(time_step)
+            neuron.set_time_step(time_step)
 
         monitor = Monitor(
             neuron,
@@ -239,6 +238,7 @@ class RasterPlotter(AbstractPlotter):
         ax.scatter(time[exc_xs], hib_ys, label="Excitatory", s=5)
         ax.scatter(time[inh_xs], inh_ys, label="Inhibitory", s=5)
         ax.set_xlim(time.min(), time.max())
+        ax.set_ylim(-.3, spikes.shape[1] - .7)
         if legend:
             ax.legend()
         return ax
@@ -268,4 +268,39 @@ class ActivityPlotter(AbstractPlotter):
             time = torch.linspace(time.min(), time.max(), steps=bins)
         ax.plot(time, activity)
 
+        return ax
+
+
+class ConnectionWeightsPlotter(AbstractPlotter):
+    @staticmethod
+    def plot(
+            ax: Axes,
+            monitor: Union[AbstractMonitor, None],
+            post_neuron: int = None,
+            **kwargs
+    ) -> Axes:
+        ax.set_title("Connection Weights")
+        weights = monitor.get("w")
+        shape = weights.shape
+        if post_neuron is not None:
+            weights = weights[:, :, post_neuron]
+            shape = weights.shape
+        weights = weights.reshape((shape[0], reduce(mul, shape[1:])))
+        ax.plot(weights)
+        ax.legend(range(reduce(mul, shape[1:])))
+        return ax
+
+
+class SpikeTracePlotter(AbstractPlotter):
+    @staticmethod
+    def plot(
+            ax: Axes,
+            monitor: Union[AbstractMonitor, None],
+            **kwargs
+    ) -> Axes:
+        ax.set_title("Spike Trace")
+        trace = monitor.get(PopulationVariables.RB_SPIKE_TRACE)
+        time = monitor.get(PopulationVariables.RB_TIME)
+
+        ax.plot(time, trace)
         return ax

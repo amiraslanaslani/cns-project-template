@@ -73,6 +73,8 @@ class Network(torch.nn.Module):
         self.connections = {}
         self.monitors = {}
 
+        # Sets `self.training` equals to `learning` and run `train` method
+        # recursively for child modules.
         self.train(learning)
 
         # Make sure that arguments of your reward and decision classes do not
@@ -103,7 +105,7 @@ class Network(torch.nn.Module):
         self.layers[name] = layer
         self.add_module(name, layer)
 
-        layer.train(self.learning)
+        layer.train(self.training)
 
     def add_connection(
         self,
@@ -132,7 +134,7 @@ class Network(torch.nn.Module):
         self.connections[f"{pre}_to_{post}"] = connection
         self.add_module(f"{pre}_to_{post}", connection)
 
-        connection.train(self.learning)
+        connection.train(self.training)
 
     def add_monitor(self, monitor: Monitor, name: str) -> None:
         """
@@ -154,12 +156,14 @@ class Network(torch.nn.Module):
 
     def run(
         self,
-        time: float,
+        time: float = None,
         dt: float = 1.0,
         inputs: Dict[str, torch.Tensor] = {},  # Spikes
         currents: Dict[str, torch.Tensor] = {},
         one_step: bool = False,
         random_factor: float = 0,
+        resume: bool = False,
+        total_time: float = None,
         **kwargs
     ) -> None:
         """
@@ -222,29 +226,35 @@ class Network(torch.nn.Module):
         unclamps = kwargs.get("unclamp", {})
         masks = kwargs.get("masks", {})
 
-        # Set time and dt for all instances
-        for monitor in self.monitors:
-            self.monitors[monitor].set_time_steps(time, dt)
+        if total_time is None:
+            total_time = time
 
-        for layer in self.layers:
-            self.layers[layer].set_timestep(dt)
-
-        for connection in self.connections:
-            self.connections[connection].dt = dt
-
-        time_steps = int(time / dt)
-        p_bar = trange(time_steps, unit="timesteps")
-        for time_step in p_bar:
-            for layer in self.layers:
-                if layer in currents:
-                    current = currents[layer][time_step]
-                else:
-                    current = torch.tensor(0)
-                self.layers[layer].forward(current, random=random_factor)
-            for connection in self.connections:
-                self.connections[connection].compute()
+        if not resume:
+            # Set time and dt for all instances
             for monitor in self.monitors:
-                self.monitors[monitor].record()
+                self.monitors[monitor].set_time_steps(total_time, dt)
+
+            for layer in self.layers:
+                self.layers[layer].set_time_step(dt)
+
+            for connection in self.connections:
+                self.connections[connection].set_time_step(dt)
+
+        if time:
+            time_steps = int(time / dt)
+            p_bar = trange(time_steps, unit="timesteps")
+            for time_step in p_bar:
+                for layer in self.layers:
+                    if layer in currents:
+                        current = currents[layer][time_step]
+                    else:
+                        current = torch.tensor(0)
+                    self.layers[layer].forward(current=current, random=random_factor)
+                for connection in self.connections:
+                    self.connections[connection].compute()
+                    self.connections[connection].update()
+                for monitor in self.monitors:
+                    self.monitors[monitor].record()
 
     def reset_state_variables(self) -> None:
         """
@@ -264,21 +274,21 @@ class Network(torch.nn.Module):
         for monitor in self.monitors:
             self.monitors[monitor].reset_state_variables()
 
-    def train(self, mode: bool = True) -> torch.nn.Module:
-        """
-        Set the population's training mode.
-
-        Parameters
-        ----------
-        mode : bool, optional
-            Mode of training. `True` turns on the training while `False` turns\
-            it off. The default is True.
-
-        Returns
-        -------
-        torch.nn.Module
-
-        """
-        self.learning = mode
-        return super().train(mode)
+    # def train(self, mode: bool = True) -> torch.nn.Module:
+    #     """
+    #     Set the population's training mode.
+    #
+    #     Parameters
+    #     ----------
+    #     mode : bool, optional
+    #         Mode of training. `True` turns on the training while `False` turns\
+    #         it off. The default is True.
+    #
+    #     Returns
+    #     -------
+    #     torch.nn.Module
+    #
+    #     """
+    #     self.learning = mode
+    #     return super().train(mode)
 

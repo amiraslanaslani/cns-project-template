@@ -5,7 +5,6 @@ Module for encoding data into spike.
 from abc import ABC, abstractmethod
 from typing import Optional
 from itertools import repeat
-from functools import reduce
 
 import torch
 
@@ -113,11 +112,14 @@ class PositionEncoder(AbstractEncoder):
     Arguments
     ---------
     peaks : float
-        Tensor that includes peak points of encoder. (means of gaussians)
+        Tensor that includes peak points of encoder. (means of gaussian functions)
         Result is depends on the order of peaks.
 
     std : float, Optional
-        Standard deviation of gaussians. The default is 1.0.
+        Standard deviation of gaussian functions. The default is 1.0.
+
+    acceptance_coeff : float, Optional
+        The minimum  to filter spikes. The default is 0.95.
 
     """
 
@@ -128,6 +130,7 @@ class PositionEncoder(AbstractEncoder):
         dt: Optional[float] = 1.0,
         device: Optional[str] = "cpu",
         std: Optional[float] = 1.0,
+        acceptance_coeff: Optional[float] = 0.95,
         **kwargs
     ) -> None:
         super().__init__(
@@ -136,21 +139,22 @@ class PositionEncoder(AbstractEncoder):
             device=device,
             **kwargs
         )
-        self.std = torch.tensor(std, device=self.device)
-        self.steps = torch.tensor(int(self.time / self.dt), device=self.device)
-        self.peaks = torch.flatten(peaks)
+        self.std: torch.Tensor = torch.tensor(std, device=self.device)
+        self.steps: torch.Tensor = torch.tensor(int(self.time / self.dt), device=self.device)
+        self.peaks: torch.Tensor = torch.flatten(peaks)
+        self.acceptance_ratio: float = acceptance_coeff
 
     def __call__(self, data: torch.Tensor) -> torch.Tensor:
         data = torch.flatten(data)
         result = torch.full((self.steps, self.peaks.size()[0]), False, device=self.device)
         for ndx, peak in enumerate(self.peaks):
-            g = self.rev_gaussian(data, peak)
-            g = g[g < self.steps * 0.9]
+            g = self.__rev_gaussian(data, peak)
+            g = g[g < self.steps * self.acceptance_ratio]
             g = torch.round(g)
             result[g.long(), ndx] = True
         return result
 
-    def rev_gaussian(self, x: torch.Tensor, mu: torch.Tensor):
+    def __rev_gaussian(self, x: torch.Tensor, mu: torch.Tensor):
         power = (- (x - mu) * (x - mu)) / (2 * self.std * self.std)
         return - (self.steps * torch.exp(power)) + self.steps
 
@@ -168,8 +172,8 @@ class PoissonEncoder(AbstractEncoder):
         dt: Optional[float] = 1.0,
         device: Optional[str] = "cpu",
         r: float = 10,
-        d_min: int = 0,
-        d_max: int = 255,
+        d_min: float = 0.,
+        d_max: float = 1.,
         **kwargs
     ) -> None:
         super().__init__(

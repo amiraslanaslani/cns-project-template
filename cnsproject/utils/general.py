@@ -15,8 +15,7 @@ from typing import List, Union, Dict
 import torch
 
 
-
-def get_fixed_current(value: float, time: float, dt: float, start=1, end=1) -> torch.Tensor:
+def get_fixed_current(value: float, time: float, dt: float = 1, start=0, end=1) -> torch.Tensor:
     size = int(time / dt)
     current = torch.full((size, ), value)
     current[:start] = 0

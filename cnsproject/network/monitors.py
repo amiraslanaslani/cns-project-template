@@ -89,7 +89,7 @@ class Monitor(AbstractMonitor):
         if not (time is None or dt is None):
             self.set_time_steps(time, dt)
 
-    def set_time_steps(self, time: float, dt: float):
+    def set_time_steps(self, time: float, dt: float = 1):
         """
         Set number of time steps to record.
 
