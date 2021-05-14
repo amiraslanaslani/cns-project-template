@@ -8,7 +8,7 @@ from operator import mul
 import torch
 
 from ..network.monitors import Monitor, AbstractMonitor
-from ..network.neural_populations import NeuralPopulation, LIFPopulation, PopulationVariables
+from ..network.neural_populations import NeuralPopulation, PopulationVariables
 from ..network.connections import AbstractConnection
 
 
@@ -287,6 +287,7 @@ class ConnectionWeightsPlotter(AbstractPlotter):
             shape = weights.shape
         weights = weights.reshape((shape[0], reduce(mul, shape[1:])))
         ax.plot(weights)
+        ax.set_xlim(0, shape[0])
         ax.legend(range(reduce(mul, shape[1:])))
         return ax
 

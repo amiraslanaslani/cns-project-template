@@ -164,6 +164,7 @@ class Network(torch.nn.Module):
         random_factor: float = 0,
         resume: bool = False,
         total_time: float = None,
+        verbose: int = 1,
         **kwargs
     ) -> None:
         """
@@ -242,7 +243,10 @@ class Network(torch.nn.Module):
 
         if time:
             time_steps = int(time / dt)
-            p_bar = trange(time_steps, unit="timesteps")
+            if verbose > 0:
+                p_bar = trange(time_steps, unit="timesteps")
+            else:
+                p_bar = range(time_steps)
             for time_step in p_bar:
                 for layer in self.layers:
                     if layer in currents:

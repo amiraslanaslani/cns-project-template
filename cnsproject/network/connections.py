@@ -3,7 +3,7 @@ Module for connections between neural populations.
 """
 
 from abc import ABC, abstractmethod
-from typing import Union, Sequence
+from typing import Union, Sequence, Callable
 
 import torch
 
@@ -216,7 +216,7 @@ class DenseConnection(AbstractConnection):
         self,
         pre: NeuralPopulation,
         post: NeuralPopulation = None,
-        lr: Union[float, Sequence[float]] = None,
+        lr: Union[Union[float, Sequence[Union[float, Callable]], Callable]] = None,
         weight_decay: float = 0.0,
         j0: float = 10,
         s0: float = 30,

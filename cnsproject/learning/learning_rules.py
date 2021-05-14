@@ -42,21 +42,30 @@ class AbstractLearningRule(ABC):
     def __init__(
         self,
         connection: AbstractConnection,
-        lr: Optional[Union[float, Sequence[float]]] = None,
+        lr: Optional[Union[float, Sequence[Union[float, Callable]], Callable]] = None,
         weight_decay: float = 0.,
         dt: Union[torch.Tensor, float] = 1.,
         device: str = "cpu",
         **kwargs
     ) -> None:
-        # if lr is None:
-        #     lr = [0., 0.]
-        # elif isinstance(lr, float) or isinstance(lr, int):
-        #     lr = [lr, lr]
-        #
-        # self.lr = torch.tensor(lr, dtype=torch.float)
         self.device = device
-        self.weight_decay = 1 - weight_decay if weight_decay else 1.
         self.connection = connection
+
+        if lr is None:
+            lr = [1., 1.]
+        elif isinstance(lr, int) or isinstance(lr, float) or callable(lr):
+            lr = [lr, lr]
+
+        if not callable(lr[0]):
+            self.constant_a_plus = lr[0]
+            lr[0] = lambda w: self.constant_a_plus
+
+        if not callable(lr[1]):
+            self.constant_a_minus = lr[1]
+            lr[1] = lambda w: self.constant_a_minus
+
+        self.lr = lr
+        self.weight_decay = 1 - weight_decay if weight_decay else 1.
         self.dt = dt if isinstance(dt, torch.Tensor) else torch.tensor(dt, device=self.device)
 
     def set_time_step(self, dt: Union[float, torch.Tensor]) -> None:
@@ -114,7 +123,7 @@ class NoOp(AbstractLearningRule):
     def __init__(
         self,
         connection: AbstractConnection,
-        lr: Optional[Union[float, Sequence[float]]] = None,
+        lr: Optional[Union[float, Sequence[Union[float, Callable]], Callable]] = None,
         weight_decay: float = 0.,
         **kwargs
     ) -> None:
@@ -145,32 +154,6 @@ class STDP(AbstractLearningRule):
     Implement the dynamics of STDP learning rule.You might need to implement\
     different update rules based on type of connection.
     """
-
-    def __init__(
-        self,
-        connection: AbstractConnection,
-        lr: Optional[Union[float, Sequence[float]]] = None,
-        weight_decay: float = 0.,
-        a_plus: Union[float, Callable] = 1.,
-        a_minus: Union[float, Callable] = 1.,
-        **kwargs
-    ) -> None:
-        super().__init__(
-            connection=connection,
-            lr=lr,
-            weight_decay=weight_decay,
-            **kwargs
-        )
-        if not callable(a_plus):
-            self.constant_a_plus = torch.full_like(self.connection.w, a_plus, device=self.device)
-            a_plus = lambda w: self.constant_a_plus
-        self.a_plus = a_plus
-
-        if not callable(a_minus):
-            self.constant_a_minus = torch.full_like(self.connection.w, a_minus, device=self.device)
-            a_minus = lambda w: self.constant_a_minus
-        self.a_minus = a_minus
-
     def get_spike_trace(self, pre=True):
         return (self.connection.pre if pre else self.connection.post)\
             .get(PopulationVariables.RB_SPIKE_TRACE)
@@ -180,13 +163,13 @@ class STDP(AbstractLearningRule):
         pre = self.connection.pre
 
         negative_part = (
-             self.a_minus(self.connection.w) *
+             self.lr[1](self.connection.w) *
              self.get_spike_trace(pre=False).expand((*pre.shape, *post.shape)) *
              pre.get(PopulationVariables.RB_SPIKES).expand((*post.shape, *pre.shape)).T
          )
 
         positive_part = (
-             self.a_plus(self.connection.w) *
+             self.lr[0](self.connection.w) *
              self.get_spike_trace(pre=True).expand((*post.shape, *pre.shape)).T *
              post.get(PopulationVariables.RB_SPIKES).expand((*pre.shape, *post.shape))
         )
@@ -205,6 +188,22 @@ class STDP(AbstractLearningRule):
 
 
 class FlatSTDP(STDP):
+    def __init__(
+        self,
+        connection: AbstractConnection,
+        lr: Optional[Union[float, Sequence[Union[float, Callable]], Callable]] = None,
+        weight_decay: float = 0.,
+        trace_limit_threshold: float = 0.5,
+        **kwargs
+    ) -> None:
+        super().__init__(
+            connection=connection,
+            lr=lr,
+            weight_decay=weight_decay,
+            **kwargs
+        )
+        self.trace_limit_threshold = trace_limit_threshold
+
     """
     Flattened Spike-Time Dependent Plasticity learning rule.
 
@@ -212,7 +211,7 @@ class FlatSTDP(STDP):
     different update rules based on type of connection.
     """
     def get_spike_trace(self, pre=True):
-        return torch.tensor(1., device=self.device)
+        return (super().get_spike_trace(pre) > self.trace_limit_threshold).int()
 
 
 class RSTDP(AbstractLearningRule):
@@ -226,7 +225,7 @@ class RSTDP(AbstractLearningRule):
     def __init__(
         self,
         connection: AbstractConnection,
-        lr: Optional[Union[float, Sequence[float]]] = None,
+        lr: Optional[Union[float, Sequence[Union[float, Callable]], Callable]] = None,
         weight_decay: float = 0.,
         **kwargs
     ) -> None:
@@ -265,7 +264,7 @@ class FlatRSTDP(AbstractLearningRule):
     def __init__(
         self,
         connection: AbstractConnection,
-        lr: Optional[Union[float, Sequence[float]]] = None,
+        lr: Optional[Union[float, Sequence[Union[float, Callable]], Callable]] = None,
         weight_decay: float = 0.,
         **kwargs
     ) -> None:

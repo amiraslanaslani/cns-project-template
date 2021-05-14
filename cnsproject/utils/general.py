@@ -34,7 +34,6 @@ def population_type(size: int, inhibitory_ratio: float=0.2) -> torch.Tensor:
     is_inhibitory[int(size * inhibitory_ratio):] = True
     return is_inhibitory
 
-
 # def get_monitor_of_simulation(
 #         neural_population: NeuralPopulation,
 #         current: torch.Tensor,
