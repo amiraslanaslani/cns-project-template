@@ -74,13 +74,13 @@ class Monitor(AbstractMonitor):
 
     def __init__(
         self,
-        obj: Union[NeuralPopulation, AbstractConnection],
+        obj,
         state_variables: Iterable[str],
         device: Optional[str] = "cpu",
         time: float = None,
         dt: float = None
     ) -> None:
-        self.obj: Union[NeuralPopulation, AbstractConnection] = obj
+        self.obj = obj
         self.state_variables: Iterable[str] = state_variables
         self.time_steps: int = 0
         self.device: str = device

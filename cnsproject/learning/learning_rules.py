@@ -8,8 +8,9 @@ from typing import Union, Optional, Sequence, Callable
 import numpy as np
 import torch
 
+from .rewards import AbstractReward, SimpleReward, ZeroReward
 from ..network.connections import AbstractConnection
-from ..network.neural_populations import PopulationVariables
+from ..network.neural_populations import PopulationVariables, NeuralPopulation
 
 
 class AbstractLearningRule(ABC):
@@ -52,21 +53,29 @@ class AbstractLearningRule(ABC):
         self.connection = connection
 
         if lr is None:
-            lr = [1., 1.]
+            lr = [torch.tensor(1.), torch.tensor(1.)]
         elif isinstance(lr, int) or isinstance(lr, float) or callable(lr):
-            lr = [lr, lr]
+            lr = [torch.tensor(lr), torch.tensor(lr)]
 
         if not callable(lr[0]):
-            self.constant_a_plus = lr[0]
+            self.constant_a_plus = torch.tensor(lr[0])
             lr[0] = lambda w: self.constant_a_plus
 
         if not callable(lr[1]):
-            self.constant_a_minus = lr[1]
+            self.constant_a_minus = torch.tensor(lr[1])
             lr[1] = lambda w: self.constant_a_minus
 
         self.lr = lr
         self.weight_decay = 1 - weight_decay if weight_decay else 1.
         self.dt = dt if isinstance(dt, torch.Tensor) else torch.tensor(dt, device=self.device)
+
+        self.reward: AbstractReward
+        self.set_reward(kwargs.get("reward", None))
+
+    def set_reward(self, reward: AbstractReward = None):
+        if reward is None:
+            reward = ZeroReward()
+        self.reward = reward
 
     def set_time_step(self, dt: Union[float, torch.Tensor]) -> None:
         """
@@ -84,7 +93,7 @@ class AbstractLearningRule(ABC):
         """
         self.dt = torch.tensor(dt, device=self.device)
 
-    def update(self) -> None:
+    def update(self, **kwargs) -> None:
         """
         Abstract method for a learning rule update.
 
@@ -154,27 +163,40 @@ class STDP(AbstractLearningRule):
     Implement the dynamics of STDP learning rule.You might need to implement\
     different update rules based on type of connection.
     """
-    def get_spike_trace(self, pre=True):
-        return (self.connection.pre if pre else self.connection.post)\
+    @classmethod
+    def calc_spike_trace(cls, pre: NeuralPopulation, post: NeuralPopulation, is_pre: bool = True, **kwargs):
+        return (pre if is_pre else post) \
             .get(PopulationVariables.RB_SPIKE_TRACE)
 
-    def __weight_changes(self) -> torch.Tensor:
-        post = self.connection.post
-        pre = self.connection.pre
-
-        negative_part = (
-             self.lr[1](self.connection.w) *
-             self.get_spike_trace(pre=False).expand((*pre.shape, *post.shape)) *
-             pre.get(PopulationVariables.RB_SPIKES).expand((*post.shape, *pre.shape)).T
-         )
-
-        positive_part = (
-             self.lr[0](self.connection.w) *
-             self.get_spike_trace(pre=True).expand((*post.shape, *pre.shape)).T *
-             post.get(PopulationVariables.RB_SPIKES).expand((*pre.shape, *post.shape))
+    @classmethod
+    def calc_weight_changes(
+            cls,
+            pre: NeuralPopulation,
+            post: NeuralPopulation,
+            lr: Sequence[Callable],
+            w: torch.Tensor,
+            **kwargs
+    ) -> torch.Tensor:
+        ltd = (
+                lr[1](w) *
+                cls.calc_spike_trace(pre, post, is_pre=False, **kwargs).expand((*pre.shape, *post.shape)) *
+                pre.get(PopulationVariables.RB_SPIKES).expand((*post.shape, *pre.shape)).T
         )
 
-        return positive_part - negative_part
+        ltp = (
+                lr[0](w) *
+                cls.calc_spike_trace(pre, post, is_pre=True, **kwargs).expand((*post.shape, *pre.shape)).T *
+                post.get(PopulationVariables.RB_SPIKES).expand((*pre.shape, *post.shape))
+        )
+        return ltp - ltd
+
+    def weight_changes(self) -> torch.Tensor:
+        return self.calc_weight_changes(
+            self.connection.pre,
+            self.connection.post,
+            self.lr,
+            self.connection.w
+        )
 
     def update(self, **kwargs) -> None:
         """
@@ -183,11 +205,17 @@ class STDP(AbstractLearningRule):
         Implement the dynamics and updating rule. You might need to call the\
         parent method.
         """
-        self.connection.w += self.dt * (self.__weight_changes())
+        self.connection.w += self.dt * self.weight_changes()
         super().update()
 
 
 class FlatSTDP(STDP):
+    """
+    Flattened Spike-Time Dependent Plasticity learning rule.
+
+    Implement the dynamics of Flat-STDP learning rule. You might need to implement\
+    different update rules based on type of connection.
+    """
     def __init__(
         self,
         connection: AbstractConnection,
@@ -204,14 +232,23 @@ class FlatSTDP(STDP):
         )
         self.trace_limit_threshold = trace_limit_threshold
 
-    """
-    Flattened Spike-Time Dependent Plasticity learning rule.
+    @classmethod
+    def calc_spike_trace(cls, pre: NeuralPopulation, post: NeuralPopulation, is_pre: bool = True, **kwargs):
+        threshold = kwargs.get("trace_limit_threshold", 0.5)
+        return (super().calc_spike_trace(pre, post, is_pre, **kwargs) > threshold).int()
 
-    Implement the dynamics of Flat-STDP learning rule. You might need to implement\
-    different update rules based on type of connection.
-    """
-    def get_spike_trace(self, pre=True):
-        return (super().get_spike_trace(pre) > self.trace_limit_threshold).int()
+    def weight_changes(self) -> torch.Tensor:
+        stdp = self.calc_weight_changes(
+            self.connection.pre,
+            self.connection.post,
+            self.lr,
+            self.connection.w,
+            trace_limit_threshold=self.trace_limit_threshold
+        )
+
+        flat = stdp.where(stdp >= 0, self.lr[1](self.connection.w))\
+            .where(stdp <= 0, self.lr[0](self.connection.w))
+        return flat
 
 
 class RSTDP(AbstractLearningRule):
@@ -227,6 +264,7 @@ class RSTDP(AbstractLearningRule):
         connection: AbstractConnection,
         lr: Optional[Union[float, Sequence[Union[float, Callable]], Callable]] = None,
         weight_decay: float = 0.,
+        tau_c: float = 20,
         **kwargs
     ) -> None:
         super().__init__(
@@ -235,12 +273,29 @@ class RSTDP(AbstractLearningRule):
             weight_decay=weight_decay,
             **kwargs
         )
-        """
-        TODO.
+        self.tau_c = torch.tensor(tau_c, device=self.device)
+        self.c = torch.zeros_like(connection.w)
 
-        Consider the additional required parameters and fill the body\
-        accordingly.
-        """
+    def _get_d(self):
+        return self.reward.get_dopamine_level()
+
+    def get_spike_trace(self, pre=True):
+        return (self.connection.pre if pre else self.connection.post)\
+            .get(PopulationVariables.RB_SPIKE_TRACE)
+
+    def _weight_changes(self) -> torch.Tensor:
+        return self.c * self._get_d()
+
+    def _do_update(self, **kwargs):
+        decay_c = - self.c / self.tau_c
+        stdp = STDP.calc_weight_changes(
+            self.connection.pre,
+            self.connection.post,
+            self.lr,
+            self.connection.w
+        )
+        self.c += self.dt * (decay_c + stdp)  # dc/dt = decay_c + STPD
+        self.connection.w += self.dt * self._weight_changes()  # ds(w)/dt = c * d
 
     def update(self, **kwargs) -> None:
         """
@@ -250,10 +305,11 @@ class RSTDP(AbstractLearningRule):
         parent method. Make sure to consider the reward value as a given keyword
         argument.
         """
-        pass
+        self._do_update(**kwargs)
+        super().update(**kwargs)
 
 
-class FlatRSTDP(AbstractLearningRule):
+class FlatRSTDP(RSTDP):
     """
     Flattened Reward-modulated Spike-Time Dependent Plasticity learning rule.
 
@@ -266,6 +322,8 @@ class FlatRSTDP(AbstractLearningRule):
         connection: AbstractConnection,
         lr: Optional[Union[float, Sequence[Union[float, Callable]], Callable]] = None,
         weight_decay: float = 0.,
+        trace_limit_threshold: float = 0.5,
+        window_size: int = 1000,
         **kwargs
     ) -> None:
         super().__init__(
@@ -274,14 +332,11 @@ class FlatRSTDP(AbstractLearningRule):
             weight_decay=weight_decay,
             **kwargs
         )
-        """
-        TODO.
+        self.trace_limit_threshold = trace_limit_threshold
+        self.last_windows = torch.tensor([])
+        self.window_size = window_size
 
-        Consider the additional required parameters and fill the body\
-        accordingly.
-        """
-
-    def update(self, **kwargs) -> None:
+    def _do_update(self, **kwargs) -> None:
         """
         TODO.
 
@@ -289,4 +344,21 @@ class FlatRSTDP(AbstractLearningRule):
         parent method. Make sure to consider the reward value as a given keyword
         argument.
         """
-        pass
+        flat_stdp = FlatSTDP.calc_weight_changes(
+            self.connection.pre,
+            self.connection.post,
+            self.lr,
+            self.connection.w
+        )
+
+        # Fill Windows
+        flat_stdp_unsqueezed = torch.unsqueeze(flat_stdp, 0)
+        base = self.last_windows[-self.window_size:]
+        self.last_windows = torch.cat((base, flat_stdp_unsqueezed))
+
+        # calculate dc and dw
+        if self.last_windows.shape[0] < self.window_size:
+            self.c += flat_stdp
+        else:
+            self.c += flat_stdp - self.last_windows[0]
+        self.connection.w += self.dt * self._weight_changes() / self.last_windows.shape[0]

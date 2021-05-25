@@ -7,6 +7,7 @@ from operator import mul
 
 import torch
 
+from ..learning.rewards import AbstractReward
 from ..network.monitors import Monitor, AbstractMonitor
 from ..network.neural_populations import NeuralPopulation, PopulationVariables
 from ..network.connections import AbstractConnection
@@ -219,15 +220,18 @@ class RasterPlotter(AbstractPlotter):
             monitor: Union[AbstractMonitor, None],
             inhibitories: Union[torch.Tensor, None] = None,
             legend: bool = False,
+            title: str = None,
             **kwargs
     ) -> Axes:
+        title_appendible = f" ({title})" if title else ""
+
         spikes = monitor.get(PopulationVariables.RB_SPIKES)
         time = monitor.get(PopulationVariables.RB_TIME)
 
         if inhibitories is None:
             inhibitories = torch.full((spikes.shape[1],), False)
 
-        ax.set_title("Raster Plot")
+        ax.set_title("Raster Plot" + title_appendible)
         ax.set_xlabel("time")
         temp_spikes_exc = spikes.clone().detach()
         temp_spikes_inh = spikes.clone().detach()
@@ -277,9 +281,11 @@ class ConnectionWeightsPlotter(AbstractPlotter):
             ax: Axes,
             monitor: Union[AbstractMonitor, None],
             post_neuron: int = None,
+            title: str = None,
             **kwargs
     ) -> Axes:
-        ax.set_title("Connection Weights")
+        title_appendible = f" ({title})" if title else ""
+        ax.set_title("Connection Weights" + title_appendible)
         weights = monitor.get("w")
         shape = weights.shape
         if post_neuron is not None:
@@ -304,4 +310,41 @@ class SpikeTracePlotter(AbstractPlotter):
         time = monitor.get(PopulationVariables.RB_TIME)
 
         ax.plot(time, trace)
+        return ax
+
+
+class DopaminePlotter(AbstractPlotter):
+    @staticmethod
+    def plot(
+            ax: Axes,
+            monitor: Union[AbstractMonitor, None],
+            **kwargs
+    ) -> Axes:
+        ax.set_title("Dopamine")
+        dopamine = monitor.get('d')
+        ax.set_xlim(0, dopamine.shape[0])
+        ax.plot(dopamine)
+        return ax
+
+
+class SynapticTagPlotter(AbstractPlotter):
+    @staticmethod
+    def plot(
+            ax: Axes,
+            monitor: Union[AbstractMonitor, None],
+            post_neuron: int = None,
+            title: str = None,
+            **kwargs
+    ) -> Axes:
+        title_appendible = f" ({title})" if title else ""
+        ax.set_title("Synaptic Tags" + title_appendible)
+        weights = monitor.get("c")
+        shape = weights.shape
+        if post_neuron is not None:
+            weights = weights[:, :, post_neuron]
+            shape = weights.shape
+        weights = weights.reshape((shape[0], reduce(mul, shape[1:])))
+        ax.plot(weights)
+        ax.set_xlim(0, shape[0])
+        ax.legend(range(reduce(mul, shape[1:])))
         return ax

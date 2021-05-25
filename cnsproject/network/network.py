@@ -2,7 +2,7 @@
 Module for spiking neural network construction and simulation.
 """
 
-from typing import Optional, Dict
+from typing import Optional, Dict, Type
 
 import torch
 from tqdm import trange
@@ -63,8 +63,8 @@ class Network(torch.nn.Module):
     def __init__(
         self,
         learning: bool = True,
-        reward: Optional[AbstractReward] = None,
-        decision: Optional[AbstractDecision] = None,
+        reward: Optional[Type[AbstractReward]] = None,
+        decision: Optional[Type[AbstractDecision]] = None,
         **kwargs
     ) -> None:
         super().__init__()
@@ -80,10 +80,12 @@ class Network(torch.nn.Module):
         # Make sure that arguments of your reward and decision classes do not
         # share same names. Their arguments are passed to the network as its
         # keyword arguments.
-        if not (reward is None):
+        self.reward = None
+        if reward is not None:
             self.reward = reward(**kwargs)
 
-        if not (decision is None):
+        self.decision = None
+        if decision is not None:
             self.decision = decision(**kwargs)
 
     def add_layer(self, layer: NeuralPopulation, name: str) -> None:
@@ -133,7 +135,8 @@ class Network(torch.nn.Module):
         """
         self.connections[f"{pre}_to_{post}"] = connection
         self.add_module(f"{pre}_to_{post}", connection)
-
+        if self.reward is not None:
+            connection.set_learning_reward(self.reward)
         connection.train(self.training)
 
     def add_monitor(self, monitor: Monitor, name: str) -> None:
@@ -248,6 +251,9 @@ class Network(torch.nn.Module):
             else:
                 p_bar = range(time_steps)
             for time_step in p_bar:
+                if self.reward is not None:
+                    self.reward.compute()
+                    self.reward.update()
                 for layer in self.layers:
                     if layer in currents:
                         current = currents[layer][time_step]
@@ -269,6 +275,9 @@ class Network(torch.nn.Module):
         None
 
         """
+        if self.reward is not None:
+            self.reward.reset_state_variables()
+
         for layer in self.layers:
             self.layers[layer].reset_state_variables()
 

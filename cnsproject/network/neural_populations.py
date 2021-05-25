@@ -391,7 +391,7 @@ class LIFPopulation(NeuralPopulation):
         """
         self.current = current
         if random > 0:
-            self.current = torch.tensor(random) * torch.rand(self.n) + self.current
+            self.current = torch.tensor(random * 2) * (torch.rand(self.n) - .5) + self.current
             self.current[self.current < 0] = 0
 
         self.u = self.compute_potential()

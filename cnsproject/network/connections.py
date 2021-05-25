@@ -124,6 +124,9 @@ class AbstractConnection(ABC, torch.nn.Module):
         )
         self.w[~ self.mask] = 0
 
+    def set_learning_reward(self, reward):
+        self.learning_rule.set_reward(reward)
+
     def set_time_step(self, dt: Union[float, torch.Tensor]) -> None:
         """
         Time step length setter.
@@ -232,7 +235,11 @@ class DenseConnection(AbstractConnection):
             **kwargs
         )
 
-    def compute_mask(self, shape: torch.Tensor, **kwargs) -> torch.Tensor:
+    def compute_mask(self, shape: torch.Tensor, anti_diagonal=False, **kwargs) -> torch.Tensor:
+        if anti_diagonal:
+            assert shape[0] == shape[1]
+            diagonal = 1 - torch.diag(torch.ones(shape[0]))
+            return diagonal.bool()
         return torch.full(shape, True)
 
     def reset_state_variables(self) -> None:
