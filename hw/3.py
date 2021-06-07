@@ -51,7 +51,7 @@ monitor = None
 for index, parameter in enumerate(parameters):
     for connection_type in connection_types:
         neuron = LIFPopulation(**parameter)
-        neuron.set_timestep(dt)
+        neuron.set_time_step(dt)
         connection = connection_type(neuron, j0=parameter['j0'], s0=parameter['s0'])
 
         monitor = Monitor(neuron, [

@@ -20,7 +20,7 @@ def get_result_from_vector(
         title=None,
         file: str = ""
 ):
-    neuron.set_timestep(dt)
+    neuron.set_time_step(dt)
 
     monitor = Monitor(neuron, state_variables=["u", "time", "current", "s"])
     monitor.set_time_steps(time, dt)

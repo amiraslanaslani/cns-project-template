@@ -22,7 +22,7 @@ def get_result_from_vector(
         title=None,
         draw_current: bool = False
 ):
-    neuron.set_timestep(dt)
+    neuron.set_time_step(dt)
 
     monitor = get_monitor_of_simulation(
         neuron,
