@@ -1,5 +1,6 @@
 from abc import abstractmethod, ABC
 from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from typing import Union, Tuple
 import copy
 from functools import reduce
@@ -221,6 +222,7 @@ class RasterPlotter(AbstractPlotter):
             inhibitories: Union[torch.Tensor, None] = None,
             legend: bool = False,
             title: str = None,
+            dots_size: int = 5,
             **kwargs
     ) -> Axes:
         title_appendible = f" ({title})" if title else ""
@@ -239,8 +241,8 @@ class RasterPlotter(AbstractPlotter):
         temp_spikes_inh[:, inhibitories] = 0
         inh_xs, inh_ys = temp_spikes_inh.nonzero(as_tuple=True)
         exc_xs, hib_ys = temp_spikes_exc.nonzero(as_tuple=True)
-        ax.scatter(time[exc_xs], hib_ys, label="Excitatory", s=5)
-        ax.scatter(time[inh_xs], inh_ys, label="Inhibitory", s=5)
+        ax.scatter(time[exc_xs], hib_ys, label="Excitatory", s=dots_size)
+        ax.scatter(time[inh_xs], inh_ys, label="Inhibitory", s=dots_size)
         ax.set_xlim(time.min(), time.max())
         ax.set_ylim(-.3, spikes.shape[1] - .7)
         if legend:
@@ -347,4 +349,33 @@ class SynapticTagPlotter(AbstractPlotter):
         ax.plot(weights)
         ax.set_xlim(0, shape[0])
         ax.legend(range(reduce(mul, shape[1:])))
+        return ax
+
+
+class FunctionPlotter(AbstractPlotter):
+    @staticmethod
+    def plot(
+            ax: Axes,
+            function: callable,
+            title: str = None,
+            **kwargs
+    ) -> Axes:
+        function(ax)
+        ax.set_title(title)
+        return ax
+
+
+class ImagePlotter(AbstractPlotter):
+    @staticmethod
+    def plot(
+            ax: Axes,
+            image: torch.Tensor,
+            figure: Figure = None,
+            title: str = None,
+            cmap='viridis',
+            **kwargs
+    ) -> Axes:
+        img = ax.imshow(image, cmap=cmap)
+        figure.colorbar(img, ax=ax)
+        ax.set_title(title)
         return ax

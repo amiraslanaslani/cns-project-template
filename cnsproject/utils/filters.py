@@ -1,16 +1,38 @@
 from abc import ABC, abstractmethod
 from functools import reduce
 from operator import mul
+from typing import Tuple
 
 import torch
 
 from .constants import PI, TWO
-from .general import gaussian_2d
 
 
 # Filter types
 ON_CENTER = 'oncenter'
 OFF_CENTER = 'offcenter'
+
+
+def convolve(image: torch.Tensor, filter: torch.Tensor, clip: Tuple[float, float] = None):
+    image_shape = image.shape
+    filter_shape = filter.shape
+    filter_margin_x = int((filter_shape[0] - 1) / 2)
+    filter_margin_y = int((filter_shape[1] - 1) / 2)
+
+    conv_x = torch.arange(filter_margin_x, image_shape[0] - filter_margin_x).int()
+    conv_y = torch.arange(filter_margin_y, image_shape[1] - filter_margin_y).int()
+    result = torch.zeros(conv_x.shape[0], conv_y.shape[0])
+    for i, set_i in zip(conv_x, range(conv_x.shape[0])):
+        for j, set_j in zip(conv_y, range(conv_y.shape[0])):
+            result[set_i][set_j] = (
+                    filter * image[
+                             i-filter_margin_x:i+filter_margin_x+1,
+                             j-filter_margin_y:j+filter_margin_y+1
+                    ]
+            ).sum()
+    if clip is not None:
+        result = torch.clamp(result, min=clip[0], max=clip[1])
+    return result
 
 
 class AbstractFilterMaker(ABC):
@@ -81,10 +103,10 @@ class DoG(AbstractFilterMaker):
 
 class Gabor(AbstractFilterMaker):
     @staticmethod
-    def gabor(x, y, lamb, theta, sigma, gama):
+    def gabor(x, y, lamb, theta, sigma, gamma):
         xx = x * torch.cos(theta) + y * torch.sin(theta)
         yy = - x * torch.sin(theta) + y * torch.cos(theta)
-        exp_term = - (xx * xx + gama * gama * yy * yy) / (2 * sigma * sigma)
+        exp_term = - (xx * xx + gamma * gamma * yy * yy) / (2 * sigma * sigma)
         cos_term = (2 * PI * xx) / lamb
         return torch.exp(exp_term) * torch.cos(cos_term)
 
@@ -94,7 +116,7 @@ class Gabor(AbstractFilterMaker):
         lamb = kwargs['wavelen']
         theta = kwargs['theta']
         sigma = kwargs['sigma']
-        gama = kwargs['gama']
+        gamma = kwargs['gamma']
 
         assert n % 2 == 1
 
@@ -102,9 +124,9 @@ class Gabor(AbstractFilterMaker):
         lamb = torch.tensor(lamb)
         theta = torch.tensor(theta)
         sigma = torch.tensor(sigma)
-        gama = torch.tensor(gama)
+        gamma = torch.tensor(gamma)
 
         n2 = (n - 1) / 2
         arange = torch.arange(-n2, n2 + 1)
         xv, yv = torch.meshgrid([arange, arange])
-        return cls.gabor(xv, yv, lamb, theta, sigma, gama)
+        return cls.gabor(xv, yv, lamb, theta, sigma, gamma)

@@ -77,7 +77,7 @@ class Plot:
                 y_until = y + 1
 
             ax = self.fig.add_subplot(self.grid[x:x_until, y:y_until])
-            plotter.plot(ax, monitor_in_use, **kwargs)
+            plotter.plot(ax, monitor=monitor_in_use, figure=self.fig, **kwargs)
             self.grid_axs.append(ax)
         else:
             plotter.plot(self.axs[x][y], monitor_in_use, **kwargs)
