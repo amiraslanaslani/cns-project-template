@@ -121,7 +121,7 @@ class NeuralPopulation(torch.nn.Module):
 
         if is_inhibitory is None:
             self.is_inhibitory = population_type(
-                size=self.n,
+                shape=self.shape,
                 inhibitory_ratio=0
             )
         else:
@@ -393,7 +393,6 @@ class LIFPopulation(NeuralPopulation):
         if random > 0:
             self.current = torch.tensor(random * 2) * (torch.rand(self.n) - .5) + self.current
             self.current[self.current < 0] = 0
-
         self.u = self.compute_potential()
         self.compute_spike()
         super().forward()
@@ -418,8 +417,6 @@ class LIFPopulation(NeuralPopulation):
 
     def compute_spike(self) -> None:
         self.s = self.u >= self.threshold
-        # self.s = self.u.ge(self.threshold)
-        # self.u[indexes] = self.u_rest.float()
         self.u = torch.where(self.s, self.u_rest.float(), self.u)
 
     def reset_state_variables(self) -> None:

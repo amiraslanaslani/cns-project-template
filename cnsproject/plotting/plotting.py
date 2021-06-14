@@ -80,7 +80,7 @@ class Plot:
             plotter.plot(ax, monitor=monitor_in_use, figure=self.fig, **kwargs)
             self.grid_axs.append(ax)
         else:
-            plotter.plot(self.axs[x][y], monitor_in_use, **kwargs)
+            plotter.plot(ax=self.axs[x][y], monitor=monitor_in_use, **kwargs)
         return self
 
     def make_tight(self) -> Plot:

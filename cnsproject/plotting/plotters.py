@@ -228,6 +228,7 @@ class RasterPlotter(AbstractPlotter):
         title_appendible = f" ({title})" if title else ""
 
         spikes = monitor.get(PopulationVariables.RB_SPIKES)
+        spikes = spikes.reshape(spikes.shape[0], reduce(mul, spikes.shape[1:]))
         time = monitor.get(PopulationVariables.RB_TIME)
 
         if inhibitories is None:
@@ -376,6 +377,7 @@ class ImagePlotter(AbstractPlotter):
             **kwargs
     ) -> Axes:
         img = ax.imshow(image, cmap=cmap)
-        figure.colorbar(img, ax=ax)
+        if figure:
+            figure.colorbar(img, ax=ax)
         ax.set_title(title)
         return ax

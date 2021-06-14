@@ -9,7 +9,8 @@ Note: You are going to need to implement DoG and Gabor filters. A possible opt
 ion would be to write them in this file but it is not a must and you can define\
 a separate module/package for them.
 """
-
+from functools import reduce
+from operator import mul
 from typing import List, Union, Dict
 
 import torch
@@ -29,10 +30,13 @@ def get_random_current(length: int, start: float = 1, coef: float = 0.5):
     return torch.cumsum(random, dim=0).abs()
 
 
-def population_type(size: int, inhibitory_ratio: float=0.2) -> torch.Tensor:
+def population_type(shape: Union[int, tuple], inhibitory_ratio: float=0.2) -> torch.Tensor:
+    if isinstance(shape, int):
+        shape = (shape,)
+    size = reduce(mul, shape)
     is_inhibitory = torch.full((size,), False)
     is_inhibitory[int(size * inhibitory_ratio):] = True
-    return is_inhibitory
+    return is_inhibitory.reshape((*shape,))
 
 
 class Integer:

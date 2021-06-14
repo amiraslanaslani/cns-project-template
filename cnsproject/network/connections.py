@@ -3,11 +3,12 @@ Module for connections between neural populations.
 """
 
 from abc import ABC, abstractmethod
-from typing import Union, Sequence, Callable
+from typing import Union, Sequence, Callable, Iterable
 
 import torch
 
 from .neural_populations import NeuralPopulation, PopulationVariables
+from ..utils.filters import get_convolve_indices_map, calc_convolution2d_from_indices_matrix, padding2d
 
 
 class AbstractConnection(ABC, torch.nn.Module):
@@ -71,8 +72,6 @@ class AbstractConnection(ABC, torch.nn.Module):
         post: NeuralPopulation = None,
         lr: Union[float, Sequence[float]] = None,
         weight_decay: float = 0.0,
-        j0: float = 10,
-        s0: float = 30,
         **kwargs
     ) -> None:
         super().__init__()
@@ -88,21 +87,18 @@ class AbstractConnection(ABC, torch.nn.Module):
         self.pre = pre
         self.post = post
         self.lr = lr
-        N = post.shape[0]
 
         self.weight_decay = weight_decay
         self.dt: torch.Tensor = torch.tensor(1.)
 
-        w = kwargs.get(
-            'weight',
-            torch.normal(
-                mean=j0 / N,
-                std=s0 / N,
-                size=(*pre.shape, *post.shape)
-            ).abs()
-        )
-        w[~ pre.is_inhibitory, :] *= -1
+        w = self.get_initial_weights(**kwargs)
         self.register_buffer('w', w)
+
+        self.mask = torch.nn.Parameter(
+            self.compute_mask(self.w.shape, **kwargs),
+            requires_grad=False
+        )
+        self.w[~ self.mask] = 0
 
         from ..learning.learning_rules import NoOp
         learning_rule = kwargs.get('learning_rule', NoOp)
@@ -117,12 +113,6 @@ class AbstractConnection(ABC, torch.nn.Module):
         self.w_min = kwargs.get('w_min', 0.)
         self.w_max = kwargs.get('w_max', 50.)
         self.norm = kwargs.get('norm', None)
-
-        self.mask = torch.nn.Parameter(
-            self.compute_mask(self.w.shape, **kwargs),
-            requires_grad=False
-        )
-        self.w[~ self.mask] = 0
 
     def set_learning_reward(self, reward):
         self.learning_rule.set_reward(reward)
@@ -144,6 +134,22 @@ class AbstractConnection(ABC, torch.nn.Module):
         self.dt = torch.tensor(dt)
         self.learning_rule.set_time_step(dt)
 
+    def get_initial_weights(self, **kwargs) -> torch.Tensor:
+        j0 = kwargs.get('j0', 5)
+        s0 = kwargs.get('s0', 5)
+
+        N = self.post.shape[0]
+        w = kwargs.get(
+            'weight',
+            torch.normal(
+                mean=j0 / N,
+                std=s0 / N,
+                size=(*self.pre.shape, *self.post.shape)
+            ).abs()
+        )
+        w[~ self.pre.is_inhibitory, :] *= -1
+        return w
+
     @abstractmethod
     def compute_mask(self, shape: torch.Tensor, **kwargs) -> torch.Tensor:
         pass
@@ -159,9 +165,10 @@ class AbstractConnection(ABC, torch.nn.Module):
 
         """
         spikes = getattr(self.pre, PopulationVariables.RB_SPIKES)
-        spikes_effect = (self.w.t().mul(spikes)).t()
-        spikes_effect = spikes_effect.sum(dim=0)
-
+        half_flatten_w = self.w.reshape((self.pre.n, self.post.n))
+        half_flatten_spikes = spikes.reshape((self.pre.n,))
+        spikes_effect = (half_flatten_w.t().mul(half_flatten_spikes)).t()
+        spikes_effect = spikes_effect.sum(dim=0).reshape(self.post.shape)
         setattr(
             self.post,
             PopulationVariables.RB_POTENTIAL,
@@ -320,8 +327,32 @@ class ConvolutionalConnection(AbstractConnection):
         post: NeuralPopulation,
         lr: Union[float, Sequence[float]] = None,
         weight_decay: float = 0.0,
+        filters: int = 1,
+        filter_size: Iterable[int] = None,
+        default_kernels: torch.Tensor = None,
+        stride: int = 1,
+        padding: bool = False,
+        injection_coef: float = 1.,
         **kwargs
     ) -> None:
+        if default_kernels is None:
+            default_kernels = torch.rand((filters, *filter_size))
+        else:
+            filters = default_kernels.shape[0]
+            filter_size = default_kernels.shape[1:]
+
+        self.initial_kernels = default_kernels
+        self.filters = filters
+        self.filter_size = filter_size
+        self.convolve_indices_map, output_shape = get_convolve_indices_map(
+            pre.shape,
+            self.filter_size,
+            stride,
+            padding=padding
+        )
+        self.padding = padding
+        self.coef = injection_coef
+
         super().__init__(
             pre=pre,
             post=post,
@@ -329,21 +360,33 @@ class ConvolutionalConnection(AbstractConnection):
             weight_decay=weight_decay,
             **kwargs
         )
-        """
-        TODO.
 
-        1. Add more parameters if needed.
-        2. Fill the body accordingly.
-        """
+    def get_initial_weights(self, **kwargs):
+        w = self.initial_kernels
+        return w
 
-    def compute(self, s: torch.Tensor) -> None:
-        """
-        TODO.
+    def compute_mask(self, shape: torch.Tensor, **kwargs) -> torch.Tensor:
+        mask = torch.ones(shape).bool()
+        return mask
 
-        Implement the computation of post-synaptic population activity given the
-        activity of the pre-synaptic population.
-        """
-        pass
+    def compute(self) -> None:
+        spikes = getattr(self.pre, PopulationVariables.RB_SPIKES)
+        if self.padding:
+            spikes = padding2d(spikes, (self.filter_size[0] - 1) // 2, (self.filter_size[1] - 1) // 2)
+
+        conv = calc_convolution2d_from_indices_matrix(spikes, self.w, self.convolve_indices_map)
+        self.step_conv = conv
+        if self.post.shape != conv.shape:
+            raise Exception(
+                "Post population's dimensions wasn't match with convolution's output. " +
+                f"Current shape should be {tuple(conv.shape)} but current shape is {tuple(self.post.shape)}."
+            )
+
+        setattr(
+            self.post,
+            PopulationVariables.RB_POTENTIAL,
+            getattr(self.post, PopulationVariables.RB_POTENTIAL) + conv * self.coef
+        )
 
     def update(self, **kwargs) -> None:
         """
@@ -355,15 +398,14 @@ class ConvolutionalConnection(AbstractConnection):
         pass
 
     def reset_state_variables(self) -> None:
-        """
-        TODO.
-
-        Reset all the state variables of the connection.
-        """
-        pass
+        self.w = self.initial_kernels
 
 
 class PoolingConnection(AbstractConnection):
+    pass
+
+
+class T2FSMaxPoolingConnection(PoolingConnection):
     """
     Specify a pooling synaptic connection between neural populations.
 
@@ -378,48 +420,63 @@ class PoolingConnection(AbstractConnection):
         self,
         pre: NeuralPopulation,
         post: NeuralPopulation,
-        lr: Union[float, Sequence[float]] = None,
-        weight_decay: float = 0.0,
+        kernel_size: Union[float, Sequence[float]],
+        stride: int = 1,
+        padding2d: bool = False,
         **kwargs
     ) -> None:
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size, kernel_size)
+
+        self.window_size = kernel_size
+
         super().__init__(
             pre=pre,
             post=post,
-            lr=lr,
-            weight_decay=weight_decay,
+            lr=None,
+            window_size=kernel_size,
             **kwargs
         )
-        """
-        TODO.
 
-        1. Add more parameters if needed.
-        2. Fill the body accordingly.
-        """
+        self.padding2d = padding2d
+        self.convolve_indices_map, output_shape = get_convolve_indices_map(pre.shape, kernel_size, stride)
+        self.active_receptive_fields = torch.ones(output_shape)
+        self.output_shape = output_shape
 
-    def compute(self, s: torch.Tensor) -> None:
-        """
-        TODO.
+    def get_initial_weights(self, **kwargs):
+        w = torch.ones((1, *self.window_size))
+        return w
 
-        Implement the computation of post-synaptic population activity given the
-        activity of the pre-synaptic population.
-        """
-        pass
+    def compute_mask(self, shape: torch.Tensor, **kwargs) -> torch.Tensor:
+        mask = torch.ones(shape).bool()
+        return mask
+
+    def compute(self) -> None:
+        spikes = getattr(self.pre, PopulationVariables.RB_SPIKES)
+        if self.padding2d:
+            spikes = padding2d(
+                spikes,
+                int((self.window_size[0] - 1) / 2),
+                int((self.window_size[1] - 1) / 2)
+            )
+        conv = calc_convolution2d_from_indices_matrix(spikes, self.w, self.convolve_indices_map)
+        if self.post.shape != conv.shape:
+            raise Exception(
+                "Post population's dimensions wasn't match with pooling connection's output. " +
+                f"Current shape should be {tuple(conv.shape)} but current shape is {tuple(self.post.shape)}."
+            )
+        conv = conv[:, :, 0] > 0
+        output_spikes = conv * self.active_receptive_fields
+        self.active_receptive_fields *= ~ output_spikes.bool()
+        setattr(
+            self.post,
+            PopulationVariables.RB_SPIKES,
+            output_spikes
+        )
 
     def update(self, **kwargs) -> None:
-        """
-        TODO.
-
-        Update the connection weights based on the learning rule computations.\
-        You might need to call the parent method.
-
-        Note: You should be careful with this method.
-        """
         pass
 
     def reset_state_variables(self) -> None:
-        """
-        TODO.
+        self.active_receptive_fields = torch.ones(self.output_shape)
 
-        Reset all the state variables of the connection.
-        """
-        pass
