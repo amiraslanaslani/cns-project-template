@@ -3,12 +3,12 @@ Module for connections between neural populations.
 """
 
 from abc import ABC, abstractmethod
-from typing import Union, Sequence, Callable, Iterable
+from typing import Union, Sequence, Callable, Tuple
 
 import torch
+from torch.nn.functional import conv2d
 
 from .neural_populations import NeuralPopulation, PopulationVariables
-from ..utils.filters import get_convolve_indices_map, calc_convolution2d_from_indices_matrix, padding2d
 
 
 class AbstractConnection(ABC, torch.nn.Module):
@@ -313,7 +313,7 @@ class RandomConnection(AbstractConnection):
         pass
 
 
-class ConvolutionalConnection(AbstractConnection):
+class Convolutional2dConnection(AbstractConnection):
     """
     Specify a convolutional synaptic connection between neural populations.
 
@@ -327,30 +327,40 @@ class ConvolutionalConnection(AbstractConnection):
         post: NeuralPopulation,
         lr: Union[float, Sequence[float]] = None,
         weight_decay: float = 0.0,
-        filters: int = 1,
-        filter_size: Iterable[int] = None,
         default_kernels: torch.Tensor = None,
         stride: int = 1,
-        padding: bool = False,
+        padding: Union[bool, int, Tuple[int]] = False,
+        dilation: int = 1,
+        groups: int = 1,
         injection_coef: float = 1.,
         **kwargs
     ) -> None:
-        if default_kernels is None:
-            default_kernels = torch.rand((filters, *filter_size))
+        if pre.ndim < 3:
+            self.in_channels = 1
         else:
-            filters = default_kernels.shape[0]
-            filter_size = default_kernels.shape[1:]
+            self.in_channels = pre.shape[1]
 
+        if default_kernels.ndim == 2:
+            default_kernels = default_kernels.unsqueeze(0)
+
+        if default_kernels.ndim == 3:
+            default_kernels = default_kernels.expand((
+                *default_kernels.shape[:1],
+                self.in_channels // groups,
+                *default_kernels.shape[1:]
+            ))
         self.initial_kernels = default_kernels
-        self.filters = filters
-        self.filter_size = filter_size
-        self.convolve_indices_map, output_shape = get_convolve_indices_map(
-            pre.shape,
-            self.filter_size,
-            stride,
-            padding=padding
-        )
+
+        if isinstance(padding, bool):
+            if padding:
+                padding = (default_kernels[-1] - 1) // 2
+            else:
+                padding = 0
+
         self.padding = padding
+        self.stride = stride
+        self.dilation = dilation
+        self.groups = groups
         self.coef = injection_coef
 
         super().__init__(
@@ -369,18 +379,32 @@ class ConvolutionalConnection(AbstractConnection):
         mask = torch.ones(shape).bool()
         return mask
 
-    def compute(self) -> None:
-        spikes = getattr(self.pre, PopulationVariables.RB_SPIKES)
-        if self.padding:
-            spikes = padding2d(spikes, (self.filter_size[0] - 1) // 2, (self.filter_size[1] - 1) // 2)
+    def get_convolved(self):
+        spikes = getattr(self.pre, PopulationVariables.RB_SPIKES).float()
 
-        conv = calc_convolution2d_from_indices_matrix(spikes, self.w, self.convolve_indices_map)
-        self.step_conv = conv
+        for dim in [2, 3]:
+            if spikes.ndim == dim:
+                spikes = spikes.unsqueeze(0)
+
+        conv = conv2d(
+            spikes,
+            self.w,
+            stride=self.stride,
+            padding=self.padding,
+            dilation=self.dilation,
+            groups=self.groups
+        )
+
         if self.post.shape != conv.shape:
             raise Exception(
                 "Post population's dimensions wasn't match with convolution's output. " +
                 f"Current shape should be {tuple(conv.shape)} but current shape is {tuple(self.post.shape)}."
             )
+
+        return conv
+
+    def compute(self) -> None:
+        conv = self.get_convolved()
 
         setattr(
             self.post,
@@ -401,11 +425,7 @@ class ConvolutionalConnection(AbstractConnection):
         self.w = self.initial_kernels
 
 
-class PoolingConnection(AbstractConnection):
-    pass
-
-
-class T2FSMaxPoolingConnection(PoolingConnection):
+class T2FSMaxPooling2dConnection(Convolutional2dConnection):
     """
     Specify a pooling synaptic connection between neural populations.
 
@@ -422,51 +442,32 @@ class T2FSMaxPoolingConnection(PoolingConnection):
         post: NeuralPopulation,
         kernel_size: Union[float, Sequence[float]],
         stride: int = 1,
-        padding2d: bool = False,
+        padding: Union[bool, int, Tuple[int]] = False,
+        dilation: int = 1,
         **kwargs
     ) -> None:
         if isinstance(kernel_size, int):
             kernel_size = (kernel_size, kernel_size)
 
         self.window_size = kernel_size
+        self.active_receptive_fields = torch.ones((*post.shape,))
 
         super().__init__(
             pre=pre,
             post=post,
             lr=None,
             window_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            default_kernels=torch.ones((*kernel_size,)),
             **kwargs
         )
 
-        self.padding2d = padding2d
-        self.convolve_indices_map, output_shape = get_convolve_indices_map(pre.shape, kernel_size, stride)
-        self.active_receptive_fields = torch.ones(output_shape)
-        self.output_shape = output_shape
-
-    def get_initial_weights(self, **kwargs):
-        w = torch.ones((1, *self.window_size))
-        return w
-
-    def compute_mask(self, shape: torch.Tensor, **kwargs) -> torch.Tensor:
-        mask = torch.ones(shape).bool()
-        return mask
-
     def compute(self) -> None:
-        spikes = getattr(self.pre, PopulationVariables.RB_SPIKES)
-        if self.padding2d:
-            spikes = padding2d(
-                spikes,
-                int((self.window_size[0] - 1) / 2),
-                int((self.window_size[1] - 1) / 2)
-            )
-        conv = calc_convolution2d_from_indices_matrix(spikes, self.w, self.convolve_indices_map)
-        if self.post.shape != conv.shape:
-            raise Exception(
-                "Post population's dimensions wasn't match with pooling connection's output. " +
-                f"Current shape should be {tuple(conv.shape)} but current shape is {tuple(self.post.shape)}."
-            )
-        conv = conv[:, :, 0] > 0
-        output_spikes = conv * self.active_receptive_fields
+        conv = self.get_convolved()
+        conv = conv > 0
+        output_spikes = conv * self.active_receptive_fields.float()
         self.active_receptive_fields *= ~ output_spikes.bool()
         setattr(
             self.post,
@@ -474,9 +475,7 @@ class T2FSMaxPoolingConnection(PoolingConnection):
             output_spikes
         )
 
-    def update(self, **kwargs) -> None:
-        pass
-
     def reset_state_variables(self) -> None:
+        super().reset_state_variables()
         self.active_receptive_fields = torch.ones(self.output_shape)
 

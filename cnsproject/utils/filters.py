@@ -13,69 +13,69 @@ ON_CENTER = 'oncenter'
 OFF_CENTER = 'offcenter'
 
 
-def get_convolve_indices_map(
-        image_shape: Iterable[int],
-        kernel_shape: Iterable[int],
-        stride: int = 1,
-        filters_number: int = 1,
-        padding: bool = False
-) -> Tuple[torch.Tensor, Tuple[int, int]]:
-    if padding:
-        padd_size = torch.tensor(kernel_shape) if isinstance(kernel_shape, torch.Tensor) else kernel_shape
-        padd_size = torch.tensor(padd_size) - 1
-        image_shape = tuple(torch.tensor(image_shape) + padd_size)
-
-    size = reduce(mul, image_shape)
-    image_template = torch.arange(size).reshape(image_shape)
-
-    filter_margin_x = int((kernel_shape[0] - 1) / 2)
-    filter_margin_y = int((kernel_shape[1] - 1) / 2)
-
-    conv_x = torch.arange(filter_margin_x, image_shape[0] - filter_margin_x, step=stride).int()
-    conv_y = torch.arange(filter_margin_y, image_shape[1] - filter_margin_y, step=stride).int()
-
-    indices_matrix = []
-
-    for i in conv_x:
-        row = []
-        for j in conv_y:
-            tmp = image_template[
-                i - filter_margin_x:i + filter_margin_x + 1,
-                j - filter_margin_y:j + filter_margin_y + 1
-            ].flatten().tolist()
-            row.append([tmp] * filters_number)
-        indices_matrix.append(row)
-    return torch.tensor(indices_matrix), (conv_x.shape[0], conv_y.shape[0])
-
-
-def calc_convolution2d_from_indices_matrix(image: torch.Tensor, kernel: torch.Tensor, indices_matrix):
-    return (image.flatten()[indices_matrix] * kernel.reshape(kernel.shape[0], -1)).sum(dim=3)
+# def get_convolve_indices_map(
+#         image_shape: Iterable[int],
+#         kernel_shape: Iterable[int],
+#         stride: int = 1,
+#         filters_number: int = 1,
+#         padding: bool = False
+# ) -> Tuple[torch.Tensor, Tuple[int, int]]:
+#     if padding:
+#         padd_size = torch.tensor(kernel_shape) if isinstance(kernel_shape, torch.Tensor) else kernel_shape
+#         padd_size = torch.tensor(padd_size) - 1
+#         image_shape = tuple(torch.tensor(image_shape) + padd_size)
+#
+#     size = reduce(mul, image_shape)
+#     image_template = torch.arange(size).reshape(image_shape)
+#
+#     filter_margin_x = int((kernel_shape[0] - 1) / 2)
+#     filter_margin_y = int((kernel_shape[1] - 1) / 2)
+#
+#     conv_x = torch.arange(filter_margin_x, image_shape[0] - filter_margin_x, step=stride).int()
+#     conv_y = torch.arange(filter_margin_y, image_shape[1] - filter_margin_y, step=stride).int()
+#
+#     indices_matrix = []
+#
+#     for i in conv_x:
+#         row = []
+#         for j in conv_y:
+#             tmp = image_template[
+#                 i - filter_margin_x:i + filter_margin_x + 1,
+#                 j - filter_margin_y:j + filter_margin_y + 1
+#             ].flatten().tolist()
+#             row.append([tmp] * filters_number)
+#         indices_matrix.append(row)
+#     return torch.tensor(indices_matrix), (conv_x.shape[0], conv_y.shape[0])
 
 
-def padding2d(matrix: torch.tensor, padd_x: int, padd_y: int):
-    matrix_shape = torch.tensor(matrix.shape)
-    kernel_shape = torch.tensor([padd_x, padd_y]) * 2 + 1
-    base = torch.zeros(tuple(matrix_shape + kernel_shape - 1))
-    base[padd_x:-padd_x, padd_y:-padd_y] = matrix
-    return base
+# def calc_convolution2d_from_indices_matrix(image: torch.Tensor, kernel: torch.Tensor, indices_matrix):
+#     return (image.flatten()[indices_matrix] * kernel.reshape(kernel.shape[0], -1)).sum(dim=3)
 
 
-def convolve(
-        image: torch.Tensor,
-        kernel: torch.Tensor,
-        clip: Tuple[float, float] = None,
-        stride: int = 1,
-        two_d_padding=True
-):
-    if two_d_padding:
-        kernel_shape = (torch.tensor(kernel.shape) - 1) // 2
-        image = padding2d(image, kernel_shape[0], kernel_shape[1])
-
-    indices_map = get_convolve_indices_map(image.shape, kernel.shape, stride)
-    result = calc_convolution2d_from_indices_matrix(image, kernel, indices_map)
-    if clip is not None:
-        result = torch.clamp(result, min=clip[0], max=clip[1])
-    return result
+# def padding2d(matrix: torch.tensor, padd_x: int, padd_y: int):
+#     matrix_shape = torch.tensor(matrix.shape)
+#     kernel_shape = torch.tensor([padd_x, padd_y]) * 2 + 1
+#     base = torch.zeros(tuple(matrix_shape + kernel_shape - 1))
+#     base[padd_x:-padd_x, padd_y:-padd_y] = matrix
+#     return base
+#
+#
+# def convolve(
+#         image: torch.Tensor,
+#         kernel: torch.Tensor,
+#         clip: Tuple[float, float] = None,
+#         stride: int = 1,
+#         two_d_padding=True
+# ):
+#     if two_d_padding:
+#         kernel_shape = (torch.tensor(kernel.shape) - 1) // 2
+#         image = padding2d(image, kernel_shape[0], kernel_shape[1])
+#
+#     indices_map = get_convolve_indices_map(image.shape, kernel.shape, stride)
+#     result = calc_convolution2d_from_indices_matrix(image, kernel, indices_map)
+#     if clip is not None:
+#         result = torch.clamp(result, min=clip[0], max=clip[1])
+#     return result
 
 
 class AbstractFilterMaker(ABC):

@@ -58,11 +58,11 @@ class AbstractLearningRule(ABC):
             lr = [torch.tensor(lr), torch.tensor(lr)]
 
         if not callable(lr[0]):
-            self.constant_a_plus = torch.tensor(lr[0])
+            self.constant_a_plus = lr[0] if isinstance(lr[0], torch.Tensor) else torch.tensor(lr[0])
             lr[0] = lambda w: self.constant_a_plus
 
         if not callable(lr[1]):
-            self.constant_a_minus = torch.tensor(lr[1])
+            self.constant_a_minus = lr[1] if isinstance(lr[1], torch.Tensor) else torch.tensor(lr[1])
             lr[1] = lambda w: self.constant_a_minus
 
         self.lr = lr

@@ -11,7 +11,7 @@ a separate module/package for them.
 """
 from functools import reduce
 from operator import mul
-from typing import List, Union, Dict
+from typing import List, Union, Dict, Iterable
 
 import torch
 
@@ -37,6 +37,10 @@ def population_type(shape: Union[int, tuple], inhibitory_ratio: float=0.2) -> to
     is_inhibitory = torch.full((size,), False)
     is_inhibitory[int(size * inhibitory_ratio):] = True
     return is_inhibitory.reshape((*shape,))
+
+
+def iterlen(iterable: Iterable):
+    return sum(1 for e in iterable)
 
 
 class Integer:

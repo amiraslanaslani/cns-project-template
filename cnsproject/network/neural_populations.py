@@ -9,7 +9,7 @@ from typing import Union, Iterable
 
 import torch
 
-from cnsproject.utils.general import population_type
+from cnsproject.utils.general import population_type, iterlen
 
 
 class PopulationVariables:
@@ -104,6 +104,7 @@ class NeuralPopulation(torch.nn.Module):
         super().__init__()
 
         self.shape = shape
+        self.ndim = iterlen(self.shape)
         self.n = reduce(mul, self.shape)
         self.spike_trace = spike_trace
         self.additive_spike_trace = additive_spike_trace
