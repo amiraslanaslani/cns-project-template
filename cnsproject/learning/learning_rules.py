@@ -3,10 +3,11 @@ Module for learning rules.
 """
 
 from abc import ABC
-from typing import Union, Optional, Sequence, Callable
+from typing import Union, Optional, Sequence, Callable, Iterable
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from .rewards import AbstractReward, SimpleReward, ZeroReward
 from ..network.connections import AbstractConnection
@@ -362,3 +363,64 @@ class FlatRSTDP(RSTDP):
         else:
             self.c += flat_stdp - self.last_windows[0]
         self.connection.w += self.dt * self._weight_changes() / self.last_windows.shape[0]
+
+
+class Conv2dSTDP(STDP):
+    @classmethod
+    def reshaper(
+            cls,
+            tensor,
+            pre: NeuralPopulation,
+            post: NeuralPopulation,
+            w,
+            is_pre: bool = True,
+            **kwargs
+    ):
+        kernel_size = w.shape[-1] * w.shape[-2]
+        filter_size = w.shape[-3]
+        kernel_shape = w.shape[-2:]
+
+        for dim in [2, 3]:
+            if tensor.ndim == dim:
+                tensor = tensor.unsqueeze(0)
+
+        if is_pre:
+            tmp = F.unfold(tensor, kernel_shape)  # shape = (1, kernel, window)
+            return tmp.unsqueeze(2).expand(-1, -1, filter_size, -1)  # shape = (1, kernel, filters, window)
+        else:
+            post_shape: Iterable[int] = post.shape
+            tmp = tensor.reshape(
+                post_shape[0],
+                post_shape[1],
+                post_shape[2] * post_shape[3]
+            )  # shape = (1, filters, window)
+            return tmp.unsqueeze(1).expand(-1, kernel_size, -1, -1)  # shape = (1, kernel, filters, window)
+
+    @classmethod
+    def calc_weight_changes(
+            cls,
+            pre: NeuralPopulation,
+            post: NeuralPopulation,
+            lr: Sequence[Callable],
+            w: torch.Tensor,
+            **kwargs
+    ) -> torch.Tensor:
+        reshaper_params = {
+            "pre": pre,
+            "post": post,
+            "w": w
+        }
+
+        ltd = (
+                lr[1](w) *
+                cls.reshaper(cls.calc_spike_trace(pre, post, is_pre=False, **kwargs), is_pre=False, **reshaper_params) *
+                cls.reshaper(pre.get(PopulationVariables.RB_SPIKES), is_pre=True, **reshaper_params)
+        )
+
+        ltp = (
+                lr[0](w) *
+                cls.reshaper(cls.calc_spike_trace(pre, post, is_pre=True, **kwargs), is_pre=True, **reshaper_params) *
+                cls.reshaper(post.get(PopulationVariables.RB_SPIKES), is_pre=False, **reshaper_params)
+        )
+        return ltp - ltd
+
