@@ -9,6 +9,7 @@ import torch
 from torch.nn.functional import conv2d
 
 from .neural_populations import NeuralPopulation, PopulationVariables
+from ..utils.filters import Gaussian
 
 
 class AbstractConnection(ABC, torch.nn.Module):
@@ -335,6 +336,14 @@ class Convolutional2dConnection(AbstractConnection):
         injection_coef: float = 1.,
         **kwargs
     ) -> None:
+        if default_kernels is None:
+            filters_number = kwargs.get("filters", 1)
+            filter_size = kwargs.get("kernel_size")
+            if isinstance(filter_size, int):
+                filter_size = (filter_size, filter_size)
+            filter_size = filter_size[-2:]
+            default_kernels = torch.rand((1, filters_number, *filter_size))
+
         if pre.ndim < 3:
             self.in_channels = 1
         else:
@@ -456,7 +465,6 @@ class T2FSMaxPooling2dConnection(Convolutional2dConnection):
             pre=pre,
             post=post,
             lr=None,
-            window_size=kernel_size,
             stride=stride,
             padding=padding,
             dilation=dilation,
@@ -479,3 +487,29 @@ class T2FSMaxPooling2dConnection(Convolutional2dConnection):
         super().reset_state_variables()
         self.active_receptive_fields = torch.ones(self.output_shape)
 
+
+class LateralInhibition(Convolutional2dConnection):
+
+    def __init__(
+        self,
+        population: NeuralPopulation,
+        kernel_size: int,
+        std: float = 1.,
+        coef: float = 1.,
+        **kwargs
+    ) -> None:
+        self.window_size = kernel_size
+
+        kernel = Gaussian.get(n=kernel_size, std=std, make_zero_summed=False)
+        kernel = (coef * kernel / kernel.max()) - coef
+
+        super().__init__(
+            pre=population,
+            post=population,
+            lr=None,
+            stride=1,
+            padding=True,
+            dilation=1,
+            default_kernels=kernel,
+            **kwargs
+        )
