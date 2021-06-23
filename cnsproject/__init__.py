@@ -5,7 +5,6 @@ from . import (
     network,
     learning,
     encoding,
-    decision,
     plotting,
 )
 

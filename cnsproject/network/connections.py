@@ -9,7 +9,6 @@ import torch
 from torch.nn.functional import conv2d
 
 from .neural_populations import NeuralPopulation, PopulationVariables
-from ..utils.filters import Gaussian
 
 
 class AbstractConnection(ABC, torch.nn.Module):
@@ -92,7 +91,7 @@ class AbstractConnection(ABC, torch.nn.Module):
         self.weight_decay = weight_decay
         self.dt: torch.Tensor = torch.tensor(1.)
 
-        w = self.get_initial_weights(**kwargs)
+        w = self.get_initial_weights(**kwargs).clone().detach()
         self.register_buffer('w', w)
 
         self.mask = torch.nn.Parameter(
@@ -342,19 +341,26 @@ class Convolutional2dConnection(AbstractConnection):
             if isinstance(filter_size, int):
                 filter_size = (filter_size, filter_size)
             filter_size = filter_size[-2:]
-            default_kernels = torch.rand((1, filters_number, *filter_size))
+            default_kernels = torch.rand((filters_number, 1, *filter_size))  # * kwargs.get('w_max', 1.)
 
         if pre.ndim < 3:
             self.in_channels = 1
         else:
-            self.in_channels = pre.shape[1]
+            self.in_channels = pre.shape[-3]
+
+        if post.ndim < 3:
+            self.out_channels = 1
+        else:
+            self.out_channels = post.shape[-3]
+
 
         if default_kernels.ndim == 2:
             default_kernels = default_kernels.unsqueeze(0)
 
         if default_kernels.ndim == 3:
             default_kernels = default_kernels.expand((
-                *default_kernels.shape[:1],
+                # *default_kernels.shape[:1],
+                self.out_channels,
                 self.in_channels // groups,
                 *default_kernels.shape[1:]
             ))
@@ -362,7 +368,7 @@ class Convolutional2dConnection(AbstractConnection):
 
         if isinstance(padding, bool):
             if padding:
-                padding = (default_kernels[-1] - 1) // 2
+                padding = (default_kernels.shape[-1] - 1) // 2
             else:
                 padding = 0
 
@@ -388,9 +394,7 @@ class Convolutional2dConnection(AbstractConnection):
         mask = torch.ones(shape).bool()
         return mask
 
-    def get_convolved(self):
-        spikes = getattr(self.pre, PopulationVariables.RB_SPIKES).float()
-
+    def get_convolved(self, spikes: torch.Tensor):
         for dim in [2, 3]:
             if spikes.ndim == dim:
                 spikes = spikes.unsqueeze(0)
@@ -412,23 +416,16 @@ class Convolutional2dConnection(AbstractConnection):
 
         return conv
 
-    def compute(self) -> None:
-        conv = self.get_convolved()
+    def compute(self, spikes: torch.Tensor = None) -> None:
+        if spikes is None:
+            spikes = getattr(self.pre, PopulationVariables.RB_SPIKES).float()
 
+        conv = self.get_convolved(spikes)
         setattr(
             self.post,
             PopulationVariables.RB_POTENTIAL,
             getattr(self.post, PopulationVariables.RB_POTENTIAL) + conv * self.coef
         )
-
-    def update(self, **kwargs) -> None:
-        """
-        TODO.
-
-        Update the connection weights based on the learning rule computations.
-        You might need to call the parent method.
-        """
-        pass
 
     def reset_state_variables(self) -> None:
         self.w = self.initial_kernels
@@ -473,7 +470,8 @@ class T2FSMaxPooling2dConnection(Convolutional2dConnection):
         )
 
     def compute(self) -> None:
-        conv = self.get_convolved()
+        spikes = getattr(self.pre, PopulationVariables.RB_SPIKES).float()
+        conv = self.get_convolved(spikes)
         conv = conv > 0
         output_spikes = conv * self.active_receptive_fields.float()
         self.active_receptive_fields *= ~ output_spikes.bool()
@@ -486,30 +484,3 @@ class T2FSMaxPooling2dConnection(Convolutional2dConnection):
     def reset_state_variables(self) -> None:
         super().reset_state_variables()
         self.active_receptive_fields = torch.ones(self.output_shape)
-
-
-class LateralInhibition(Convolutional2dConnection):
-
-    def __init__(
-        self,
-        population: NeuralPopulation,
-        kernel_size: int,
-        std: float = 1.,
-        coef: float = 1.,
-        **kwargs
-    ) -> None:
-        self.window_size = kernel_size
-
-        kernel = Gaussian.get(n=kernel_size, std=std, make_zero_summed=False)
-        kernel = (coef * kernel / kernel.max()) - coef
-
-        super().__init__(
-            pre=population,
-            post=population,
-            lr=None,
-            stride=1,
-            padding=True,
-            dilation=1,
-            default_kernels=kernel,
-            **kwargs
-        )

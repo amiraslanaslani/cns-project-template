@@ -8,7 +8,7 @@ sys.path.append('../')
 from cnsproject.plotting.plotters import RasterPlotter, FunctionPlotter, ImagePlotter
 from cnsproject.plotting.plotting import Plot
 from cnsproject.utils.constants import PI
-from cnsproject.utils.filters import DoG, OFF_CENTER, ON_CENTER, convolve, Gabor
+from cnsproject.utils.filters import DoG, OFF_CENTER, ON_CENTER, convolve2d, Gabor
 from cnsproject.encoding.encoders import Time2FirstSpikeEncoder, PoissonEncoder
 from cnsproject.utils.monitor import DummyMonitor
 
@@ -44,7 +44,7 @@ for imgage_file in ['img1', 'img2']:
     img = torch.tensor(img.sum(2) / 3).float()
 
     for file_name, kernel, title in filters:
-        kernel_c = convolve(img, kernel, clip=(0, 255))
+        kernel_c = convolve2d(img, kernel, clip=(0, 255))
 
         kernel_flat = torch.flatten(kernel_c)
         encoder_t2fs = Time2FirstSpikeEncoder(255)

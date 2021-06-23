@@ -16,9 +16,19 @@ def convolution_parameters(
         lr=None,
         **kwargs
 ) -> dict:
+    filter_shape = None if default_kernels is None else default_kernels.shape
+    if filter_shape is None:
+        if kwargs.get("kernel_size", None) is not None and kwargs.get("filters", None) is not None:
+            filters = kwargs.get("filters")
+            kernel_size = kwargs.get("kernel_size")
+            if isinstance(kernel_size, int):
+                filter_shape = (filters, kwargs.get("kernel_size"), kwargs.get("kernel_size"))
+            else:
+                filter_shape = (filters, *kwargs.get("kernel_size"))
+
     param_dict = {
         "default_kernels": default_kernels,
-        "filter_shape": default_kernels.shape,
+        "filter_shape": filter_shape,
         "stride": stride,
         "padding": padding,
         "dilation": dilation,

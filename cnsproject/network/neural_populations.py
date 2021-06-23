@@ -9,6 +9,8 @@ from typing import Union, Iterable
 
 import torch
 
+from cnsproject.mechanism.mechanism import AbstractMechanism, register_mechanism_object, register_mechanism_function, \
+    mechanism_init, mechanism
 from cnsproject.utils.general import population_type, iterlen
 
 
@@ -102,6 +104,7 @@ class NeuralPopulation(torch.nn.Module):
         **kwargs
     ) -> None:
         super().__init__()
+        mechanism_init(self)
 
         self.shape = shape
         self.ndim = iterlen(self.shape)
@@ -137,6 +140,12 @@ class NeuralPopulation(torch.nn.Module):
         self.register_buffer(PopulationVariables.RB_POTENTIAL, torch.full((*self.shape,), 0))
         self.register_buffer(PopulationVariables.RB_TIME, torch.tensor(0))
         self.dt: torch.Tensor = torch.tensor(1.)
+
+    def register_mechanism_function(self, method_name: str, on: str, mechanism_func: callable):
+        register_mechanism_function(self, method_name, on, mechanism_func)
+
+    def register_mechanism_object(self, mechanism_instance: AbstractMechanism):
+        register_mechanism_object(self, mechanism_instance)
 
     def get(self, key: str):
         return getattr(self, key)
@@ -231,25 +240,6 @@ class NeuralPopulation(torch.nn.Module):
         if self.spike_trace:
             self.traces.zero_()
 
-    # def train(self, mode: bool = True) -> "NeuralPopulation":
-    #     """
-    #     Set the population's training mode.
-    #
-    #     Parameters
-    #     ----------
-    #     mode : bool, optional
-    #         Mode of training. `True` turns on the training while `False` turns\
-    #         it off. The default is True.
-    #
-    #     Returns
-    #     -------
-    #     NeuralPopulation
-    #
-    #     """
-    #     # self.learning = mode
-    #     super().train(mode)
-    #     return self
-
 
 class InputPopulation(NeuralPopulation):
     """
@@ -332,6 +322,7 @@ class InputPopulation(NeuralPopulation):
         super().reset_state_variables()
 
 
+# @decorate_all_methods(mechanism)
 class LIFPopulation(NeuralPopulation):
     """
     Layer of Leaky Integrate and Fire neurons.
@@ -417,8 +408,12 @@ class LIFPopulation(NeuralPopulation):
         return -self.u + self.u_rest
 
     def compute_spike(self) -> None:
+        self.set_spikes()
+        self.u = torch.where(self.u >= self.threshold, self.u_rest.float(), self.u)
+
+    @mechanism
+    def set_spikes(self) -> None:
         self.s = self.u >= self.threshold
-        self.u = torch.where(self.s, self.u_rest.float(), self.u)
 
     def reset_state_variables(self) -> None:
         super().reset_state_variables()
@@ -434,7 +429,6 @@ class ELIFPopulation(LIFPopulation):
 
     Note: You can use LIFPopulation as parent class as well.
     """
-
     def __init__(
             self,
             shape: Iterable[int],
@@ -483,9 +477,6 @@ class AELIFPopulation(ELIFPopulation):
 
     Note: You can use ELIFPopulation as parent class as well.
     """
-
-
-
     def __init__(
             self,
             shape: Iterable[int],

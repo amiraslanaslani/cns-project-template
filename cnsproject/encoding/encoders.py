@@ -193,3 +193,8 @@ class PoissonEncoder(AbstractEncoder):
         p = r_x * self.dt / self.time
         return torch.rand((steps, *data.shape), device=self.device) < p
 
+
+class IntensityToLatency(Time2FirstSpikeEncoder):
+    def __call__(self, data: torch.Tensor) -> torch.Tensor:
+        t2fs = super().__call__(data)
+        return t2fs.flip(0)

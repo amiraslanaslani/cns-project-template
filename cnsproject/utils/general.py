@@ -43,6 +43,15 @@ def iterlen(iterable: Iterable):
     return sum(1 for e in iterable)
 
 
+def decorate_all_methods(decorator):  # example: @decorate_all_methods(decorator)
+    def decorate(cls):
+        for attr in cls.__dict__:
+            if callable(getattr(cls, attr)):
+                setattr(cls, attr, decorator(getattr(cls, attr)))
+        return cls
+    return decorate
+
+
 class Integer:
     def __init__(self, value):
         self.value = value
@@ -56,23 +65,3 @@ class Integer:
     def get(self):
         return self.value
 
-
-# def get_monitor_of_simulation(
-#         neural_population: NeuralPopulation,
-#         current: torch.Tensor,
-#         time: Union[torch.Tensor, float],
-#         dt: Union[torch.Tensor, float],
-#         state_variables: List[str] = []
-# ) -> Monitor:
-#     time = torch.tensor(time)
-#     dt = torch.tensor(dt)
-#
-#     monitor = Monitor(neural_population, state_variables=state_variables)
-#     monitor.set_time_steps(time, dt)
-#     monitor.reset_state_variables()
-#
-#     for t in range(int(time / dt)):
-#         neural_population.forward(current[:, t])
-#         monitor.record()
-#
-#     return monitor

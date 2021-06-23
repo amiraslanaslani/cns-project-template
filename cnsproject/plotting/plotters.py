@@ -8,7 +8,6 @@ from operator import mul
 
 import torch
 
-from ..learning.rewards import AbstractReward
 from ..network.monitors import Monitor, AbstractMonitor
 from ..network.neural_populations import NeuralPopulation, PopulationVariables
 from ..network.connections import AbstractConnection

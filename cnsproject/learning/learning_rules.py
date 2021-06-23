@@ -104,7 +104,7 @@ class AbstractLearningRule(ABC):
 
         """
         if self.weight_decay:
-            self.connection.w *= self.weight_decay
+            self.connection.w = self.connection.w * self.weight_decay
 
         if (
                 self.connection.w_min != -np.inf or self.connection.w_max != np.inf
@@ -377,16 +377,19 @@ class Conv2dSTDP(STDP):
             **kwargs
     ):
         kernel_size = w.shape[-1] * w.shape[-2]
-        filter_size = w.shape[-3]
+        filter_size = w.shape[-4]
         kernel_shape = w.shape[-2:]
+        channels_in = w.shape[-3]
 
         for dim in [2, 3]:
             if tensor.ndim == dim:
                 tensor = tensor.unsqueeze(0)
 
+        tensor = tensor.float()
+
         if is_pre:
-            tmp = F.unfold(tensor, kernel_shape)  # shape = (1, kernel, window)
-            return tmp.unsqueeze(2).expand(-1, -1, filter_size, -1)  # shape = (1, kernel, filters, window)
+            tmp = F.unfold(tensor, kernel_shape)  # shape = (1, c_in * kernel, window)
+            return tmp.unsqueeze(2).expand(-1, -1, filter_size, -1)  # shape = (1, c_in * kernel, filters, window)
         else:
             post_shape: Iterable[int] = post.shape
             tmp = tensor.reshape(
@@ -394,7 +397,7 @@ class Conv2dSTDP(STDP):
                 post_shape[1],
                 post_shape[2] * post_shape[3]
             )  # shape = (1, filters, window)
-            return tmp.unsqueeze(1).expand(-1, kernel_size, -1, -1)  # shape = (1, kernel, filters, window)
+            return tmp.unsqueeze(1).expand(-1, channels_in * kernel_size, -1, -1)  # shape = (1, c_in * kernel, filters, window)
 
     @classmethod
     def calc_weight_changes(
@@ -411,6 +414,9 @@ class Conv2dSTDP(STDP):
             "w": w
         }
 
+        filter_size = w.shape[-4]
+        channels_in = w.shape[-3]
+
         ltd = (
                 lr[1](w) *
                 cls.reshaper(cls.calc_spike_trace(pre, post, is_pre=False, **kwargs), is_pre=False, **reshaper_params) *
@@ -422,5 +428,11 @@ class Conv2dSTDP(STDP):
                 cls.reshaper(cls.calc_spike_trace(pre, post, is_pre=True, **kwargs), is_pre=True, **reshaper_params) *
                 cls.reshaper(post.get(PopulationVariables.RB_SPIKES), is_pre=False, **reshaper_params)
         )
-        return ltp - ltd
+        result: torch.Tensor = ltp - ltd  # shape = (1, c_in * kernel, filters, window)
+        result = result.sum(dim=3)  # sum over `window` dimension
+        # result.shape is equals to (1, c_in * kernel, filters)
+        result = result.swapaxes(1, 2).reshape(1, filter_size, channels_in, w.shape[-1], w.shape[-2])
+        # shape = (1, channels_out, channels_in, H, W)
+        # print(result.max(), "\n\n\n\n\n")
+        return result.squeeze(0)  # shape = (channels_out, channels_in, H, W)
 

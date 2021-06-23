@@ -11,7 +11,6 @@ from .neural_populations import NeuralPopulation
 from .connections import AbstractConnection
 from .monitors import Monitor
 from ..learning.rewards import AbstractReward
-from ..decision.decision import AbstractDecision
 
 
 class Network(torch.nn.Module):
@@ -55,8 +54,8 @@ class Network(torch.nn.Module):
     reward : AbstractReward, Optional
         The class to allow reward modifications in case of reward-modulated
         learning. The default is None.
-    decision: AbstractDecision, Optional
-        The class to enable decision making. The default is None.
+    # decision: AbstractDecision, Optional
+    #     The class to enable decision making. The default is None.
 
     """
 
@@ -64,7 +63,6 @@ class Network(torch.nn.Module):
         self,
         learning: bool = True,
         reward: Optional[Type[AbstractReward]] = None,
-        decision: Optional[Type[AbstractDecision]] = None,
         **kwargs
     ) -> None:
         super().__init__()
@@ -83,10 +81,6 @@ class Network(torch.nn.Module):
         self.reward = None
         if reward is not None:
             self.reward = reward(**kwargs)
-
-        self.decision = None
-        if decision is not None:
-            self.decision = decision(**kwargs)
 
     def add_layer(self, layer: NeuralPopulation, name: str) -> None:
         """
@@ -286,22 +280,3 @@ class Network(torch.nn.Module):
 
         for monitor in self.monitors:
             self.monitors[monitor].reset_state_variables()
-
-    # def train(self, mode: bool = True) -> torch.nn.Module:
-    #     """
-    #     Set the population's training mode.
-    #
-    #     Parameters
-    #     ----------
-    #     mode : bool, optional
-    #         Mode of training. `True` turns on the training while `False` turns\
-    #         it off. The default is True.
-    #
-    #     Returns
-    #     -------
-    #     torch.nn.Module
-    #
-    #     """
-    #     self.learning = mode
-    #     return super().train(mode)
-
